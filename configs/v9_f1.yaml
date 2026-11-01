@@ -1,0 +1,14 @@
+base: configs/v9_e9.yaml
+# F1 (final track, round 1): the E9 recipe on ALL labelled records (fold 0 included) with
+# both external pools pseudo-labelled by the fold-0 E3+E6 teacher: batch 1 without frames
+# from hidden-test days (host: test frames only at inference, no self-training on test
+# images -> no near-duplicates of test observations in training) and batch 2 (random
+# days, never test days). Pseudo samples per epoch = labelled records (1:1, as E9).
+# No validation (all labels used); EMA weights saved as final.pt.
+train:
+  output: runs/v9_f1
+  train_split: all
+  validation: false
+  validate_before_training: false
+  extra_data_roots: [data/gong_pseudo_nt, data/gong_pseudo_b2]
+  extra_per_epoch: 1154

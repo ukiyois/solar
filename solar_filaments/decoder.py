@@ -1,0 +1,230 @@
+"""Bounded-memory, mask-guided instance queries over full-image features.
+
+Memory = context features average-pooled to small grids (finest level `memory_grid`), plus `seed_tokens`
+unpooled stride-4 tokens taken at peaks of a learned seed score, so thin filaments are not averaged away.
+Queries are initialized from spatially diverse seed peaks (`image_query_init`). Each layer runs
+self-attention, cross-attention (masked by the previous layer's masks, Mask2Former; every
+`global_attention_every`-th layer attends globally so a missed branch can be recovered), an optional
+mask-weighted memory feedback, and an attention read of native foreground/edge points of its own mask
+(`query_detail_points`). Training adds an isolated mask-pilot branch (MP-Former) that shares weights.
+"""
+import math
+import torch
+from torch import nn
+from torch.nn import functional as F
+from .piloting import noisy_pilot_support
+from .query_seeds import query_seed_indices
+
+
+def position_encoding(height, width, dim, device, dtype):
+    y, x = torch.meshgrid((torch.arange(height, device=device) + 0.5) / height,
+                          (torch.arange(width, device=device) + 0.5) / width, indexing="ij")
+    return encode_xy(torch.stack((x.flatten(), y.flatten()), -1), dim).to(dtype).unsqueeze(0)
+
+
+def encode_xy(xy, dim):
+    frequency = 10000 ** (torch.arange(dim // 4, device=xy.device).float() / (dim // 4))
+    x, y = xy[..., 0:1] * (2 * math.pi) / frequency, xy[..., 1:2] * (2 * math.pi) / frequency
+    return torch.cat((x.sin(), x.cos(), y.sin(), y.cos()), -1)
+
+
+class QueryLayer(nn.Module):
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
+        self.norms = nn.ModuleList([nn.LayerNorm(dim) for _ in range(3)])
+        self.ffn = nn.Sequential(nn.Linear(dim, 4 * dim), nn.GELU(), nn.Linear(4 * dim, dim))
+
+    def forward(self, query, query_pos, memory, memory_pos, mask):
+        q = self.norms[0](query)
+        query = query + self.self_attn(q + query_pos, q + query_pos, q, need_weights=False)[0]
+        q = self.norms[1](query)
+        query = query + self.cross_attn(q + query_pos, memory + memory_pos, memory, attn_mask=mask, need_weights=False)[0]
+        return query + self.ffn(self.norms[2](query))
+
+
+class InstanceDecoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        dim = config.feature_dim
+        self.grid, self.heads = config.memory_grid, config.heads
+        self.seed_tokens = config.seed_tokens
+        self.global_every = config.global_attention_every
+        self.seed_score = nn.Conv2d(dim, 1, 1)
+        self.query = nn.Embedding(config.queries, dim)
+        self.query_pos = nn.Embedding(config.queries, dim)
+        self.level_pos = nn.Embedding(4, dim)
+        self.layers = nn.ModuleList([QueryLayer(dim, config.heads) for _ in range(config.decoder_layers)])
+        self.norm = nn.LayerNorm(dim)
+        self.classifier = nn.Linear(dim, 2)  # foreground filament / no object
+        self.quality = nn.Linear(dim, 1)
+        self.mask_embed = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, config.mask_dim))
+        self.mask_features4 = nn.Conv2d(dim, config.mask_dim, 1)
+        self.phase_embed = nn.Linear(dim, config.phase_dim) if config.phase_dim else None
+        self.phase_gain = nn.Parameter(torch.tensor(1e-3)) if config.phase_dim else None
+        self.feedback = nn.Linear(dim, dim) if config.mask_feedback else None
+        self.feedback_gain = nn.Parameter(torch.tensor(1e-2)) if config.mask_feedback else None
+        self.detail_points = config.query_detail_points
+        self.pilot_point_noise, self.pilot_label_noise = config.pilot_point_noise, config.pilot_label_noise
+        self.pilot_labels = nn.Embedding(2, dim) if config.denoising_queries else None
+        self.image_query_init = config.image_query_init
+        self.query_init_candidates = config.query_init_candidates
+        self.query_init_diversity = config.query_init_diversity
+        if self.image_query_init:
+            self.seed_query_projection = nn.Sequential(nn.Linear(dim, dim), nn.LayerNorm(dim))
+            nn.init.eye_(self.seed_query_projection[0].weight)
+            nn.init.zeros_(self.seed_query_projection[0].bias)
+            self.seed_query_gain = nn.Parameter(torch.tensor(.1))
+            self.seed_position_gain = nn.Parameter(torch.tensor(1.))
+        if self.detail_points:
+            self.detail_attention = nn.MultiheadAttention(dim, config.heads, batch_first=True)
+            self.detail_norm = nn.LayerNorm(dim)
+            self.detail_gain = nn.Parameter(torch.tensor(1e-3))
+
+    def attend_native_details(self, query, pixels, masks, seeds):
+        """Per-instance foreground/edge points from the native stride-4 path.
+
+        Global memory pooling can average an 8-pixel-wide filament out of a
+        42-pixel cell. These tokens bypass that pooling. The point selection is
+        detached, as in mask-guided attention; features and attention train.
+        """
+        b, d, h, w = pixels.shape
+        q = query.shape[1]
+        half = min(self.detail_points // 2, h * w)
+        with torch.no_grad():
+            p = masks.detach().sigmoid()
+            saliency = seeds.detach().sigmoid()
+            body = p * (.5 + .5 * saliency)
+            peaks = body == F.max_pool2d(body, 3, 1, 1)
+            body = torch.where(peaks, body, body * .01)
+            edge = 4 * p * (1 - p) * (.5 + .5 * saliency)
+            chosen = torch.cat((body.flatten(2).topk(half, -1).indices,
+                                edge.flatten(2).topk(half, -1).indices), -1)
+            xy = torch.stack(((chosen % w + .5) / w, (chosen // w + .5) / h), -1)
+        features = pixels.flatten(2).transpose(1, 2)
+        batch = torch.arange(b, device=pixels.device)[:, None, None]
+        local = features[batch, chosen].reshape(b * q, -1, d)
+        position = encode_xy(xy, d).to(local.dtype).reshape(b * q, -1, d)
+        normalized = self.detail_norm(query).reshape(b * q, 1, d)
+        update = self.detail_attention(normalized, local + position, local, need_weights=False)[0]
+        return query + self.detail_gain * update.reshape(b, q, d)
+
+    def predict(self, query, basis4):
+        query = self.norm(query)
+        embed = self.mask_embed(query)
+        result = {"pred_logits": self.classifier(query), "pred_quality": self.quality(query).squeeze(-1),
+                  "mask_embeddings": embed, "pred_masks": torch.einsum("bqc,bchw->bqhw", embed, basis4)}
+        if self.phase_embed is not None:
+            result["phase_embeddings"] = self.phase_gain * self.phase_embed(query)
+        return result
+
+    def piloted_decode(self, pixels4, basis4, memory, memory_pos, shapes, indices, seeds, guides):
+        """An isolated training branch shares decoder weights with normal queries.
+
+        Keeping separate self-attention prevents GT-guided tokens from leaking
+        into the normal predictions. The branch is absent at inference.
+        """
+        b, slots = guides.shape[:2]
+        valid = guides.flatten(2).any(-1)
+        labels = (~valid).long()
+        labels = labels ^ (torch.rand_like(labels.float()) < self.pilot_label_noise).long()
+        query = self.pilot_labels(labels) + .01 * self.query.weight[:slots][None]
+        query_pos = self.query_pos.weight[:slots][None]
+        supports = [F.adaptive_max_pool2d(guides.float(), size).flatten(2) > 0 for size in shapes]
+        if indices is not None:
+            guide4 = F.interpolate(guides.float(), size=pixels4.shape[-2:], mode='nearest').flatten(2)
+            supports.append(guide4.gather(2, indices[:, None].expand(-1, slots, -1)) > 0)
+        support = torch.cat(supports, -1)
+        predictions = []
+        for layer in self.layers:
+            noisy = noisy_pilot_support(support, self.pilot_point_noise)
+            if self.feedback is not None:
+                weights = noisy.float()
+                pooled = weights @ memory.float() / weights.sum(-1, keepdim=True).clamp_min(1)
+                query = query + self.feedback_gain * self.feedback(pooled.to(query.dtype))
+            blocked = ~noisy
+            blocked = blocked & ~blocked.all(-1, keepdim=True)
+            mask = blocked[:, None].expand(-1, self.heads, -1, -1).reshape(b * self.heads, slots, memory.shape[1])
+            query = layer(query, query_pos, memory, memory_pos, mask)
+            prediction = self.predict(query, basis4)
+            if self.detail_points:
+                query = self.attend_native_details(query, pixels4, prediction['pred_masks'], seeds)
+                prediction = self.predict(query, basis4)
+            predictions.append(prediction)
+        prediction['aux_outputs'] = predictions[:-1]
+        return prediction
+
+    def attention_values(self, masks, shapes, indices):
+        """Mask logits on every memory token: bilinearly resized grids, then the exact seed positions."""
+        values = [F.interpolate(masks, size=size, mode="bilinear", align_corners=False).flatten(2) for size in shapes]
+        if indices is not None:
+            values.append(masks.flatten(2).gather(2, indices[:, None].expand(-1, masks.shape[1], -1)))
+        return torch.cat(values, -1)
+
+    def forward(self, pixels4, context_pyramid, denoising_masks=None):
+        # Scene memory: stride-4 detail features and two context levels, pooled to bounded grids.
+        sources = [pixels4, context_pyramid[1], context_pyramid[2]]
+        tokens, positions, shapes = [], [], []
+        for i, source in enumerate(sources):
+            limit = max(4, self.grid // (2 ** i))
+            h, w = source.shape[-2:]
+            scale = min(1, limit / max(h, w))
+            size = (max(1, round(h * scale)), max(1, round(w * scale)))
+            feature = F.adaptive_avg_pool2d(source, size)
+            tokens.append(feature.flatten(2).transpose(1, 2))
+            positions.append(position_encoding(*size, feature.shape[1], feature.device, feature.dtype) + self.level_pos.weight[i][None, None])
+            shapes.append(size)
+        memory, memory_pos = torch.cat(tokens, 1), torch.cat(positions, 1)
+        seed_logits = self.seed_score(pixels4)
+        indices = None
+        if self.seed_tokens:
+            b, d, h, w = pixels4.shape
+            scores = seed_logits.detach()
+            peaks = scores == F.max_pool2d(scores, 7, 1, 3)
+            scores = torch.where(peaks, scores, scores - 100)
+            indices = scores.flatten(1).topk(min(self.seed_tokens, h * w), dim=-1).indices
+            detail_tokens = pixels4.flatten(2).transpose(1, 2).gather(1, indices[..., None].expand(-1, -1, d))
+            xy = torch.stack(((indices % w + 0.5) / w, (indices // w + 0.5) / h), -1)
+            detail_pos = encode_xy(xy, d).to(detail_tokens.dtype) + self.level_pos.weight[3][None, None]
+            memory, memory_pos = torch.cat((memory, detail_tokens), 1), torch.cat((memory_pos.expand(b, -1, -1), detail_pos), 1)
+        query = self.query.weight.unsqueeze(0).expand(pixels4.shape[0], -1, -1)
+        query_pos = self.query_pos.weight.unsqueeze(0)
+        if self.image_query_init:
+            locations = query_seed_indices(seed_logits, query.shape[1], self.query_init_candidates,
+                                           self.query_init_diversity)
+            b, d, h, w = pixels4.shape
+            seed_features = pixels4.flatten(2).transpose(1, 2).gather(
+                1, locations[..., None].expand(-1, -1, d))
+            seed_xy = torch.stack(((locations % w + .5) / w, (locations // w + .5) / h), -1)
+            query = query + self.seed_query_gain * self.seed_query_projection(seed_features)
+            query_pos = query_pos + self.seed_position_gain * encode_xy(seed_xy, d).to(query.dtype)
+        basis4 = self.mask_features4(pixels4)
+        prediction = self.predict(query, basis4)
+        predictions = []
+        for layer_index, layer in enumerate(self.layers):
+            values = self.attention_values(prediction["pred_masks"].detach(), shapes, indices)
+            if self.feedback is not None:
+                weights = values.float().sigmoid()
+                pooled = weights @ memory.float() / weights.sum(-1, keepdim=True).clamp_min(1e-6)
+                query = query + self.feedback_gain * self.feedback(pooled.to(query.dtype))
+            blocked = values < 0
+            blocked = blocked & ~blocked.all(-1, keepdim=True)
+            mask = blocked[:, None].expand(-1, self.heads, -1, -1).reshape(-1, query.shape[1], memory.shape[1])
+            # Periodic global attention can recover distant branches initially
+            # excluded by a bad mask. Other layers retain local mask guidance.
+            use_global = self.global_every > 0 and layer_index % self.global_every == 0
+            query = layer(query, query_pos, memory, memory_pos, None if use_global else mask)
+            if self.detail_points:
+                query = self.attend_native_details(query, pixels4, prediction['pred_masks'], seed_logits)
+            prediction = self.predict(query, basis4)
+            predictions.append(prediction)
+        prediction["aux_outputs"] = predictions[:-1]
+        prediction["memory_tokens"] = memory.shape[1]
+        prediction["seed_logits"] = seed_logits
+        if denoising_masks is not None:
+            if self.pilot_labels is None or not self.training:
+                raise ValueError('Mask pilots require a configured training-only branch')
+            prediction['denoising'] = self.piloted_decode(pixels4, basis4, memory, memory_pos, shapes,
+                                                          indices, seed_logits, denoising_masks)
+        return prediction

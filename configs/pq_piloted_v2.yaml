@@ -1,0 +1,9 @@
+base: configs/pq_aligned_v1.yaml
+model:
+  denoising_queries: 32
+  pilot_point_noise: 0.2
+  pilot_label_noise: 0.2
+train:
+  output: runs/pq_piloted_v2
+loss:
+  pilot_weight: 1.0

@@ -1,0 +1,16 @@
+base: configs/pq_piloted_v2.yaml
+model:
+  image_query_init: true
+  query_init_candidates: 1024
+  query_init_diversity: 1.0
+train:
+  output: runs/pq_seeded_v3
+loss:
+  # Continue the source model's final PQ temperatures; keep loss comparable.
+  pq_iou_temperature: 0.1
+  pq_score_temperature: 0.05
+  pq_mask_temperature: 0.5
+  pq_owner_temperature: 0.15
+  structural_warmup: 0
+  pq_sampling: balanced_mixture
+  quality_target: best_native_sampled

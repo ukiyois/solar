@@ -1,0 +1,75 @@
+{
+ "single-annotator": {
+  "matched": 311,
+  "near_miss_0.3_0.5": 87,
+  "query_ok_low_score": 58,
+  "no_query": 50,
+  "weak_0.1_0.3": 69,
+  "query_ok_lost": 1
+ },
+ "single-annotator 500-1500": {
+  "matched": 136,
+  "near_miss_0.3_0.5": 31,
+  "query_ok_low_score": 25,
+  "weak_0.1_0.3": 32,
+  "no_query": 15,
+  "query_ok_lost": 1
+ },
+ "single-annotator 1500-5000": {
+  "matched": 113,
+  "query_ok_low_score": 18,
+  "no_query": 8,
+  "near_miss_0.3_0.5": 31,
+  "weak_0.1_0.3": 11
+ },
+ "single-annotator <500": {
+  "near_miss_0.3_0.5": 18,
+  "no_query": 27,
+  "weak_0.1_0.3": 25,
+  "matched": 35,
+  "query_ok_low_score": 13
+ },
+ "single-annotator >=5000": {
+  "matched": 27,
+  "weak_0.1_0.3": 1,
+  "near_miss_0.3_0.5": 7,
+  "query_ok_low_score": 2
+ },
+ "multi-annotator": {
+  "matched": 399,
+  "query_ok_low_score": 78,
+  "near_miss_0.3_0.5": 144,
+  "no_query": 57,
+  "weak_0.1_0.3": 86,
+  "query_ok_lost": 1
+ },
+ "multi-annotator 500-1500": {
+  "matched": 196,
+  "query_ok_low_score": 44,
+  "near_miss_0.3_0.5": 49,
+  "no_query": 22,
+  "query_ok_lost": 1,
+  "weak_0.1_0.3": 35
+ },
+ "multi-annotator <500": {
+  "query_ok_low_score": 16,
+  "near_miss_0.3_0.5": 30,
+  "matched": 37,
+  "weak_0.1_0.3": 40,
+  "no_query": 29
+ },
+ "multi-annotator 1500-5000": {
+  "matched": 132,
+  "near_miss_0.3_0.5": 56,
+  "query_ok_low_score": 17,
+  "weak_0.1_0.3": 9,
+  "no_query": 4
+ },
+ "multi-annotator >=5000": {
+  "matched": 34,
+  "no_query": 2,
+  "weak_0.1_0.3": 2,
+  "near_miss_0.3_0.5": 9,
+  "query_ok_low_score": 1
+ }
+}

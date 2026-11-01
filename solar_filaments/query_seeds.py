@@ -1,0 +1,39 @@
+"""Image-conditioned query locations from native-detail candidate features."""
+import torch
+from torch.nn import functional as F
+
+
+@torch.no_grad()
+def query_seed_indices(logits, queries, candidate_count=1024, diversity=.5):
+    """Keep strong peaks, then cover remaining locations with quality-weighted FPS.
+
+    Coordinates and ranking are detached; gathered feature values still receive
+    gradients. Nearby peaks along the same long filament otherwise consume a
+    disproportionate number of initial queries. The spatial preference is soft:
+    low-confidence distant background does not automatically outrank a filament.
+    """
+    b, _, h, w = logits.shape
+    value = logits[:, 0].float()
+    peaks = value == F.max_pool2d(value[:, None], 7, 1, 3)[:, 0]
+    ranked = torch.where(peaks, value, value - 100).flatten(1)
+    count = min(max(queries, candidate_count), h * w)
+    indices = ranked.topk(count, dim=1).indices
+    if diversity == 0:
+        return indices[:, :queries]
+    quality = value.flatten(1).gather(1, indices).sigmoid().square()
+    xy = torch.stack(((indices % w + .5) / w, (indices // w + .5) / h), -1)
+    # Preserve the most reliable quarter, then spend the other slots on distinct
+    # high-quality locations. All arithmetic remains on the CUDA device.
+    initial = max(1, queries // 4)
+    chosen = [torch.full((b,), i, device=logits.device, dtype=torch.long) for i in range(initial)]
+    distance = ((xy[:, :, None] - xy[:, None, :initial]).square().sum(-1)).amin(-1)
+    batch = torch.arange(b, device=logits.device)
+    for _ in range(initial, queries):
+        priority = quality * distance.clamp_min(0).pow(diversity)
+        priority = torch.where(distance > 0, priority, -torch.ones_like(priority))
+        next_index = priority.argmax(-1)
+        chosen.append(next_index)
+        center = xy[batch, next_index]
+        distance = torch.minimum(distance, (xy - center[:, None]).square().sum(-1))
+    chosen = torch.stack(chosen, 1)
+    return indices.gather(1, chosen)

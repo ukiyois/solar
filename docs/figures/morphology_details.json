@@ -1,0 +1,5 @@
+{
+ "matched_pairs_gt_area_ge_1500": 329,
+ "multipart_predictions": 146,
+ "missed_small_gt_lt_400": 122
+}

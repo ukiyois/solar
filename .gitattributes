@@ -1,0 +1,11 @@
+# LF line endings in the repository and in every checkout
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.pt binary
+*.pth binary
+*.zip binary
+*.fits binary
+*.gz binary

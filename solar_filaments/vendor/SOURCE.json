@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/OpenGVLab/DCNv4",
+  "commit": "4b848f7dd7da74ff03f7d278f902c6fd05b391b5",
+  "file": "classification/models/flash_intern_image.py",
+  "changes": [
+    "local DropPath import",
+    "selectable native/reference DCNv4 operator",
+    "non-reentrant activation checkpointing",
+    "corrected paper links in the docstring"
+  ]
+}

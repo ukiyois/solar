@@ -1,0 +1,13 @@
+base: configs/pq_recovery_v7.yaml
+# E0: the v7 recipe (loss balance and optimizer unchanged) with single-GPU batch 3
+# and grid validation, used as the round-2 base if neither E1 arm beats v7.
+train:
+  output: runs/v9_e0
+  epochs: 24
+  batch_size: 3
+  warmup_epochs: 1
+  validate_every: 2
+  validate_before_training: true
+  validation_grid:
+    scores: [0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3]
+    masks: [0.5, 0.6, 0.725]

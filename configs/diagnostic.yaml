@@ -1,0 +1,17 @@
+model:
+  backbone: diagnostic
+  context_size: 64
+  feature_dim: 48
+  mask_dim: 16
+  detail_channels: 8
+  queries: 32
+  decoder_layers: 2
+  heads: 4
+  memory_grid: 8
+  seed_tokens: 32
+  curve_points: 5
+  detail_tile: 64
+  detail_halo: 32
+  dcn_backend: reference
+  backbone_checkpointing: false
+  pretrained: ''

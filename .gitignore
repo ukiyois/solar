@@ -1,0 +1,24 @@
+# competition data, caches, run outputs and large artifacts are not part of the source release
+data/
+runs/
+deliverables/
+weights/*.pt
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+third_party/DCNv4_op/build/
+# local environments and caches
+.venv*/
+.cache/
+.ipynb_checkpoints/
+# LaTeX build outputs of the paper (the PDF is built with latexmk -pdf main.tex)
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.log
+paper/*.out
+paper/*.synctex.gz
+paper/main.pdf

@@ -1,0 +1,8 @@
+{
+  "repository": "OpenGVLab/DCNv4",
+  "revision": "5cd15e23aa709b55b547ff45b58d75934ca03785",
+  "filename": "flash_intern_image_l_22kto1k_384.pth",
+  "bytes": 893472403,
+  "sha256": "c694efa31c67cc246d836513080da98861a46a8ba3cee5d0dc6a8074f1a4384d",
+  "url": "https://huggingface.co/OpenGVLab/DCNv4/resolve/5cd15e23aa709b55b547ff45b58d75934ca03785/flash_intern_image_l_22kto1k_384.pth"
+}

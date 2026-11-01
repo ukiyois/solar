@@ -1,0 +1,161 @@
+{
+ "fold-0 annotations": {
+  "instances": 1341,
+  "area": {
+   "mean": 1796.139,
+   "quantiles_10_50_90": [
+    357.0,
+    1076.0,
+    3858.0
+   ]
+  },
+  "parts": {
+   "mean": 1.0,
+   "quantiles_10_50_90": [
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "elongation": {
+   "mean": 4.116,
+   "quantiles_10_50_90": [
+    1.98,
+    3.81,
+    6.6
+   ]
+  },
+  "width": {
+   "mean": 16.711,
+   "quantiles_10_50_90": [
+    8.39,
+    14.39,
+    28.0
+   ]
+  },
+  "solidity": {
+   "mean": 0.596,
+   "quantiles_10_50_90": [
+    0.33,
+    0.58,
+    0.89
+   ]
+  },
+  "holes": {
+   "mean": 0.144,
+   "quantiles_10_50_90": [
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "multi_part_fraction": 0.0,
+  "with_holes_fraction": 0.1037
+ },
+ "fold-0 predictions": {
+  "instances": 711,
+  "area": {
+   "mean": 2071.594,
+   "quantiles_10_50_90": [
+    480.0,
+    1296.0,
+    4330.0
+   ]
+  },
+  "parts": {
+   "mean": 1.276,
+   "quantiles_10_50_90": [
+    1.0,
+    1.0,
+    2.0
+   ]
+  },
+  "elongation": {
+   "mean": 4.254,
+   "quantiles_10_50_90": [
+    2.08,
+    3.98,
+    6.7
+   ]
+  },
+  "width": {
+   "mean": 18.835,
+   "quantiles_10_50_90": [
+    9.99,
+    16.79,
+    31.19
+   ]
+  },
+  "solidity": {
+   "mean": 0.658,
+   "quantiles_10_50_90": [
+    0.43,
+    0.67,
+    0.89
+   ]
+  },
+  "holes": {
+   "mean": 0.1,
+   "quantiles_10_50_90": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "multi_part_fraction": 0.2053,
+  "with_holes_fraction": 0.0591
+ },
+ "test predictions": {
+  "instances": 1072,
+  "area": {
+   "mean": 2220.679,
+   "quantiles_10_50_90": [
+    529.1,
+    1385.0,
+    4807.8
+   ]
+  },
+  "parts": {
+   "mean": 1.268,
+   "quantiles_10_50_90": [
+    1.0,
+    1.0,
+    2.0
+   ]
+  },
+  "elongation": {
+   "mean": 4.148,
+   "quantiles_10_50_90": [
+    2.16,
+    3.88,
+    6.53
+   ]
+  },
+  "width": {
+   "mean": 19.667,
+   "quantiles_10_50_90": [
+    10.79,
+    17.19,
+    31.54
+   ]
+  },
+  "solidity": {
+   "mean": 0.642,
+   "quantiles_10_50_90": [
+    0.4,
+    0.65,
+    0.87
+   ]
+  },
+  "holes": {
+   "mean": 0.121,
+   "quantiles_10_50_90": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "multi_part_fraction": 0.1922,
+  "with_holes_fraction": 0.056
+ }
+}

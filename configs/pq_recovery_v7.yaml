@@ -1,0 +1,41 @@
+base: configs/pq_seeded_v3.yaml
+train:
+  output: runs/pq_recovery_v7
+  epochs: 12
+  # Return to the head LR used to produce the source best checkpoint after
+  # 1e-4 caused a large measured validation drop; this is still a 5e-5 head LR.
+  learning_rate: 0.00005
+  backbone_learning_rate: 0.000005
+  warmup_epochs: 1
+  validate_every: 1
+  validate_before_training: true
+  compile: true
+  compile_backend: inductor
+  compile_mode: default
+  compile_fullgraph: false
+  accumulation: 1
+loss:
+  # Keep the principal objective and the measured validation operating point aligned.
+  pq_surrogate: soft
+  pq_objective: log
+  pq_score_threshold: 0.15
+  auxiliary_scale: 0.02
+  weights:
+    pq: 1.0
+    class: 2.0
+    mask: 1.0
+    fine_mask: 1.0
+    quality: 0.5
+    decoder_aux: 0.25
+    seed: 0.2
+    area_iou: 0.0
+    topology: 0.0
+    center_coverage: 0.0
+    boundary_distance: 0.0
+    competition: 0.0
+    semantic: 0.0
+    centerline: 0.0
+    boundary: 0.0
+inference:
+  score_threshold: 0.15
+  mask_threshold: 0.725

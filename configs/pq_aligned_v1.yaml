@@ -1,0 +1,33 @@
+base: configs/dual_3090.yaml
+model:
+  query_detail_points: 64
+train:
+  output: runs/pq_aligned_v1
+  epochs: 40
+  learning_rate: 0.00005
+  backbone_learning_rate: 0.000005
+  warmup_epochs: 1
+  validate_every: 1
+  validate_before_training: true
+  compile: true
+  compile_backend: inductor
+  compile_mode: default
+  compile_fullgraph: false
+  log_every: 5
+  drop_last: true
+  initial_scale: 1024
+loss:
+  weights:
+    pq: 1.0
+  auxiliary_scale: 0.05
+  pq_objective: log
+  pq_point_count: 16384
+  pq_iou_temperature: 0.2
+  pq_iou_temperature_final: 0.1
+  pq_score_temperature: 0.15
+  pq_score_temperature_final: 0.05
+  pq_mask_temperature: 1.0
+  pq_mask_temperature_final: 0.5
+  pq_owner_temperature: 0.5
+  pq_owner_temperature_final: 0.15
+  pq_temperature_epochs: 10

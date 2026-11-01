@@ -1,0 +1,53 @@
+{
+ "records": 192,
+ "images": 120,
+ "pq": 0.436,
+ "sq": 0.6763,
+ "rq": 0.6446,
+ "tp": 790,
+ "fp": 320,
+ "fn": 551,
+ "pair_iou_mean": 0.5802,
+ "pair_dice_mean": 0.7105,
+ "pair_iou_quantiles_10_25_50_75_90": [
+  0.286,
+  0.493,
+  0.63,
+  0.722,
+  0.777
+ ],
+ "pair_dice_quantiles_10_25_50_75_90": [
+  0.445,
+  0.66,
+  0.773,
+  0.838,
+  0.874
+ ],
+ "semantic_dice_mean": 0.6595,
+ "semantic_dice_median": 0.6971,
+ "semantic_dice_global": 0.6911,
+ "semantic_dice_torchmetrics_vs_rle_max_abs_diff": 2.943157328960666e-08,
+ "one_to_many_gt_degree": {
+  "0": 306,
+  "1": 1005,
+  "2": 27,
+  "3": 3
+ },
+ "many_to_one_pred_degree": {
+  "0": 122,
+  "1": 917,
+  "2": 62,
+  "3": 9
+ },
+ "setting": {
+  "folders": [
+   "runs/recall_tta/val"
+  ],
+  "views": [
+   "d0,d1,d2,d3,f0,f1,f2,f3"
+  ],
+  "votes": 1,
+  "score": 0.1,
+  "mask": 0.4
+ }
+}

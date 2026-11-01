@@ -1,0 +1,14 @@
+base: configs/v9_f1.yaml
+# Final-A single model: F1 (all labels + compliant round-1 self-training) continued 12 epochs on the
+# round-2 pool (9,272 compliant frames, teacher E9+E6), fine-tuning LR 0.25x, PQ surrogate at final
+# temperatures. Flat field (neutral on fold 0) and calibrated loss (worse) not included.
+train:
+  output: runs/v9_ffinal_a
+  epochs: 12
+  warmup_epochs: 1
+  learning_rate: 0.0000125
+  backbone_learning_rate: 0.00000125
+  extra_data_roots: [data/gong_pseudo_r2]
+  extra_per_epoch: 1154
+loss:
+  pq_temperature_epochs: 0.01

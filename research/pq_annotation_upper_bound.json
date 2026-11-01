@@ -1,0 +1,860 @@
+{
+  "fold": 0,
+  "physical_images": 120,
+  "annotator_records": 192,
+  "GT_instances": 1341,
+  "within_annotator_GT_overlap_pairs": 0,
+  "fractional_Jaccard_upper_bound": 0.8293056951293946,
+  "target": 0.7,
+  "target_certificate_gap": 352.8020584709376,
+  "target_ruled_out_by_this_bound": false,
+  "meaning": "Upper bound on any disjoint single-image prediction shared across all annotator versions. Positive target gap does NOT prove target achievable.",
+  "relaxations": [
+    "Prediction shapes need not be spatially realizable.",
+    "Selected prediction groups may overlap spatially.",
+    "Group selection is fractional, not binary.",
+    "IoU>.5 lower bounds relaxed to >=.5."
+  ],
+  "per_image_target_certificate": [
+    {
+      "file_name": "20110119082634Lh.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20110123174914Mh.jpeg",
+      "annotators": 1,
+      "GT": 3,
+      "clusters": 3,
+      "maximum_relaxed_profit": 3.9000000000000004
+    },
+    {
+      "file_name": "20110211084114Th.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20110213093414Th.jpeg",
+      "annotators": 2,
+      "GT": 10,
+      "clusters": 15,
+      "maximum_relaxed_profit": 9.645876777321234
+    },
+    {
+      "file_name": "20110317082654Uh.jpeg",
+      "annotators": 1,
+      "GT": 6,
+      "clusters": 6,
+      "maximum_relaxed_profit": 7.8
+    },
+    {
+      "file_name": "20110616133454Bh.jpeg",
+      "annotators": 2,
+      "GT": 10,
+      "clusters": 14,
+      "maximum_relaxed_profit": 8.426119033506437
+    },
+    {
+      "file_name": "20110803164914Mh.jpeg",
+      "annotators": 3,
+      "GT": 33,
+      "clusters": 68,
+      "maximum_relaxed_profit": 24.571233390764117
+    },
+    {
+      "file_name": "20110914063134Lh.jpeg",
+      "annotators": 3,
+      "GT": 58,
+      "clusters": 125,
+      "maximum_relaxed_profit": 40.9263589201856
+    },
+    {
+      "file_name": "20110923165814Mh.jpeg",
+      "annotators": 3,
+      "GT": 18,
+      "clusters": 40,
+      "maximum_relaxed_profit": 9.922837013186992
+    },
+    {
+      "file_name": "20111029063154Uh.jpeg",
+      "annotators": 2,
+      "GT": 18,
+      "clusters": 25,
+      "maximum_relaxed_profit": 13.364577546244677
+    },
+    {
+      "file_name": "20111116063134Lh.jpeg",
+      "annotators": 3,
+      "GT": 33,
+      "clusters": 76,
+      "maximum_relaxed_profit": 26.101270734957552
+    },
+    {
+      "file_name": "20111206102934Ch.jpeg",
+      "annotators": 1,
+      "GT": 15,
+      "clusters": 15,
+      "maximum_relaxed_profit": 19.500000000000004
+    },
+    {
+      "file_name": "20111215063134Lh.jpeg",
+      "annotators": 3,
+      "GT": 19,
+      "clusters": 35,
+      "maximum_relaxed_profit": 10.036718660668157
+    },
+    {
+      "file_name": "20111218085014Th.jpeg",
+      "annotators": 3,
+      "GT": 36,
+      "clusters": 76,
+      "maximum_relaxed_profit": 24.49139494180621
+    },
+    {
+      "file_name": "20111226155454Bh.jpeg",
+      "annotators": 1,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 5.2
+    },
+    {
+      "file_name": "20120223152054Bh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20120330063154Uh.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20120331142954Bh.jpeg",
+      "annotators": 2,
+      "GT": 11,
+      "clusters": 16,
+      "maximum_relaxed_profit": 9.761641544680328
+    },
+    {
+      "file_name": "20120430063154Uh.jpeg",
+      "annotators": 1,
+      "GT": 8,
+      "clusters": 8,
+      "maximum_relaxed_profit": 10.4
+    },
+    {
+      "file_name": "20120703070814Th.jpeg",
+      "annotators": 3,
+      "GT": 43,
+      "clusters": 81,
+      "maximum_relaxed_profit": 17.76160269824988
+    },
+    {
+      "file_name": "20120712123634Ch.jpeg",
+      "annotators": 1,
+      "GT": 12,
+      "clusters": 12,
+      "maximum_relaxed_profit": 15.600000000000003
+    },
+    {
+      "file_name": "20120715123434Ch.jpeg",
+      "annotators": 3,
+      "GT": 25,
+      "clusters": 55,
+      "maximum_relaxed_profit": 19.86722619006128
+    },
+    {
+      "file_name": "20120730135454Bh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20120810121634Ch.jpeg",
+      "annotators": 2,
+      "GT": 16,
+      "clusters": 24,
+      "maximum_relaxed_profit": 12.543301822711294
+    },
+    {
+      "file_name": "20120910074014Th.jpeg",
+      "annotators": 3,
+      "GT": 21,
+      "clusters": 43,
+      "maximum_relaxed_profit": 16.095421668328882
+    },
+    {
+      "file_name": "20120928063134Lh.jpeg",
+      "annotators": 1,
+      "GT": 8,
+      "clusters": 8,
+      "maximum_relaxed_profit": 10.4
+    },
+    {
+      "file_name": "20121007131134Ch.jpeg",
+      "annotators": 2,
+      "GT": 8,
+      "clusters": 11,
+      "maximum_relaxed_profit": 6.46151250692022
+    },
+    {
+      "file_name": "20121018063134Lh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20121022145554Bh.jpeg",
+      "annotators": 1,
+      "GT": 19,
+      "clusters": 19,
+      "maximum_relaxed_profit": 24.700000000000006
+    },
+    {
+      "file_name": "20121113103634Ch.jpeg",
+      "annotators": 3,
+      "GT": 24,
+      "clusters": 51,
+      "maximum_relaxed_profit": 16.993357390222666
+    },
+    {
+      "file_name": "20130211063134Lh.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20130212153254Bh.jpeg",
+      "annotators": 1,
+      "GT": 8,
+      "clusters": 8,
+      "maximum_relaxed_profit": 10.4
+    },
+    {
+      "file_name": "20130218220314Mh.jpeg",
+      "annotators": 3,
+      "GT": 9,
+      "clusters": 18,
+      "maximum_relaxed_profit": 6.3071090009293505
+    },
+    {
+      "file_name": "20130305112734Ch.jpeg",
+      "annotators": 3,
+      "GT": 24,
+      "clusters": 56,
+      "maximum_relaxed_profit": 19.60627540505414
+    },
+    {
+      "file_name": "20130327175114Mh.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20130404063134Lh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20130405114734Ch.jpeg",
+      "annotators": 1,
+      "GT": 13,
+      "clusters": 13,
+      "maximum_relaxed_profit": 16.900000000000002
+    },
+    {
+      "file_name": "20130517063134Lh.jpeg",
+      "annotators": 3,
+      "GT": 25,
+      "clusters": 56,
+      "maximum_relaxed_profit": 18.281661138292733
+    },
+    {
+      "file_name": "20130609173414Mh.jpeg",
+      "annotators": 1,
+      "GT": 15,
+      "clusters": 15,
+      "maximum_relaxed_profit": 19.500000000000004
+    },
+    {
+      "file_name": "20130805135854Bh.jpeg",
+      "annotators": 1,
+      "GT": 17,
+      "clusters": 17,
+      "maximum_relaxed_profit": 22.100000000000005
+    },
+    {
+      "file_name": "20130903060834Lh.jpeg",
+      "annotators": 2,
+      "GT": 13,
+      "clusters": 19,
+      "maximum_relaxed_profit": 12.131443181806752
+    },
+    {
+      "file_name": "20130926060834Lh.jpeg",
+      "annotators": 1,
+      "GT": 15,
+      "clusters": 15,
+      "maximum_relaxed_profit": 19.500000000000004
+    },
+    {
+      "file_name": "20131030185354Bh.jpeg",
+      "annotators": 1,
+      "GT": 13,
+      "clusters": 13,
+      "maximum_relaxed_profit": 16.900000000000002
+    },
+    {
+      "file_name": "20131101222734Lh.jpeg",
+      "annotators": 2,
+      "GT": 16,
+      "clusters": 23,
+      "maximum_relaxed_profit": 13.724232544791183
+    },
+    {
+      "file_name": "20131109190514Mh.jpeg",
+      "annotators": 1,
+      "GT": 6,
+      "clusters": 6,
+      "maximum_relaxed_profit": 7.8
+    },
+    {
+      "file_name": "20131109222434Lh.jpeg",
+      "annotators": 2,
+      "GT": 26,
+      "clusters": 37,
+      "maximum_relaxed_profit": 20.877870882646114
+    },
+    {
+      "file_name": "20131113004514Mh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20131113185414Mh.jpeg",
+      "annotators": 1,
+      "GT": 8,
+      "clusters": 8,
+      "maximum_relaxed_profit": 10.4
+    },
+    {
+      "file_name": "20131204192154Bh.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20140128174554Bh.jpeg",
+      "annotators": 1,
+      "GT": 19,
+      "clusters": 19,
+      "maximum_relaxed_profit": 24.700000000000006
+    },
+    {
+      "file_name": "20140225163314Th.jpeg",
+      "annotators": 2,
+      "GT": 22,
+      "clusters": 32,
+      "maximum_relaxed_profit": 19.464837706058223
+    },
+    {
+      "file_name": "20140414020354Uh.jpeg",
+      "annotators": 2,
+      "GT": 17,
+      "clusters": 21,
+      "maximum_relaxed_profit": 11.46352184418418
+    },
+    {
+      "file_name": "20140428233234Lh.jpeg",
+      "annotators": 1,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 5.2
+    },
+    {
+      "file_name": "20140523195814Mh.jpeg",
+      "annotators": 1,
+      "GT": 11,
+      "clusters": 11,
+      "maximum_relaxed_profit": 14.300000000000002
+    },
+    {
+      "file_name": "20140922195854Bh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20141009023454Uh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20141016195834Ch.jpeg",
+      "annotators": 3,
+      "GT": 33,
+      "clusters": 68,
+      "maximum_relaxed_profit": 21.23980316415549
+    },
+    {
+      "file_name": "20141105195814Mh.jpeg",
+      "annotators": 2,
+      "GT": 16,
+      "clusters": 23,
+      "maximum_relaxed_profit": 14.601744112237808
+    },
+    {
+      "file_name": "20141106195854Bh.jpeg",
+      "annotators": 3,
+      "GT": 27,
+      "clusters": 56,
+      "maximum_relaxed_profit": 17.23928126293188
+    },
+    {
+      "file_name": "20150222112034Ch.jpeg",
+      "annotators": 1,
+      "GT": 12,
+      "clusters": 12,
+      "maximum_relaxed_profit": 15.600000000000003
+    },
+    {
+      "file_name": "20150225171114Mh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20150305081954Uh.jpeg",
+      "annotators": 1,
+      "GT": 11,
+      "clusters": 11,
+      "maximum_relaxed_profit": 14.300000000000002
+    },
+    {
+      "file_name": "20150308081954Uh.jpeg",
+      "annotators": 3,
+      "GT": 21,
+      "clusters": 49,
+      "maximum_relaxed_profit": 11.561626263999031
+    },
+    {
+      "file_name": "20150323172814Mh.jpeg",
+      "annotators": 1,
+      "GT": 13,
+      "clusters": 13,
+      "maximum_relaxed_profit": 16.900000000000002
+    },
+    {
+      "file_name": "20150324145954Bh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20150327145114Th.jpeg",
+      "annotators": 1,
+      "GT": 11,
+      "clusters": 11,
+      "maximum_relaxed_profit": 14.300000000000002
+    },
+    {
+      "file_name": "20150527082014Th.jpeg",
+      "annotators": 1,
+      "GT": 6,
+      "clusters": 6,
+      "maximum_relaxed_profit": 7.8
+    },
+    {
+      "file_name": "20150620082014Th.jpeg",
+      "annotators": 1,
+      "GT": 8,
+      "clusters": 8,
+      "maximum_relaxed_profit": 10.4
+    },
+    {
+      "file_name": "20150621161314Mh.jpeg",
+      "annotators": 1,
+      "GT": 15,
+      "clusters": 15,
+      "maximum_relaxed_profit": 19.500000000000004
+    },
+    {
+      "file_name": "20150630083214Th.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20150727082014Th.jpeg",
+      "annotators": 2,
+      "GT": 3,
+      "clusters": 3,
+      "maximum_relaxed_profit": 1.8000000000000003
+    },
+    {
+      "file_name": "20150913082014Th.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20151013144654Bh.jpeg",
+      "annotators": 1,
+      "GT": 9,
+      "clusters": 9,
+      "maximum_relaxed_profit": 11.700000000000001
+    },
+    {
+      "file_name": "20151105133734Ch.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20151116224034Lh.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20151118172314Mh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20151128133734Ch.jpeg",
+      "annotators": 2,
+      "GT": 15,
+      "clusters": 18,
+      "maximum_relaxed_profit": 10.598833675273934
+    },
+    {
+      "file_name": "20151209201754Bh.jpeg",
+      "annotators": 1,
+      "GT": 12,
+      "clusters": 12,
+      "maximum_relaxed_profit": 15.600000000000003
+    },
+    {
+      "file_name": "20151213023454Uh.jpeg",
+      "annotators": 1,
+      "GT": 6,
+      "clusters": 6,
+      "maximum_relaxed_profit": 7.8
+    },
+    {
+      "file_name": "20151224133734Ch.jpeg",
+      "annotators": 1,
+      "GT": 12,
+      "clusters": 12,
+      "maximum_relaxed_profit": 15.600000000000003
+    },
+    {
+      "file_name": "20160127225034Lh.jpeg",
+      "annotators": 1,
+      "GT": 14,
+      "clusters": 14,
+      "maximum_relaxed_profit": 18.200000000000003
+    },
+    {
+      "file_name": "20160129225334Lh.jpeg",
+      "annotators": 1,
+      "GT": 16,
+      "clusters": 16,
+      "maximum_relaxed_profit": 20.800000000000004
+    },
+    {
+      "file_name": "20160225173314Mh.jpeg",
+      "annotators": 3,
+      "GT": 16,
+      "clusters": 27,
+      "maximum_relaxed_profit": 6.95139476333086
+    },
+    {
+      "file_name": "20160226173214Mh.jpeg",
+      "annotators": 2,
+      "GT": 13,
+      "clusters": 19,
+      "maximum_relaxed_profit": 10.078883959558748
+    },
+    {
+      "file_name": "20160617133654Bh.jpeg",
+      "annotators": 3,
+      "GT": 17,
+      "clusters": 35,
+      "maximum_relaxed_profit": 14.139074646042292
+    },
+    {
+      "file_name": "20160808133714Th.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    },
+    {
+      "file_name": "20160831133714Th.jpeg",
+      "annotators": 1,
+      "GT": 10,
+      "clusters": 10,
+      "maximum_relaxed_profit": 13.000000000000002
+    },
+    {
+      "file_name": "20161012133734Ch.jpeg",
+      "annotators": 1,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 5.2
+    },
+    {
+      "file_name": "20161105222634Lh.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20161110151454Bh.jpeg",
+      "annotators": 2,
+      "GT": 4,
+      "clusters": 5,
+      "maximum_relaxed_profit": 3.3038759689922483
+    },
+    {
+      "file_name": "20170119031254Uh.jpeg",
+      "annotators": 3,
+      "GT": 7,
+      "clusters": 12,
+      "maximum_relaxed_profit": 3.1639935215545867
+    },
+    {
+      "file_name": "20170411013550Uh.jpeg",
+      "annotators": 1,
+      "GT": 3,
+      "clusters": 3,
+      "maximum_relaxed_profit": 3.9000000000000004
+    },
+    {
+      "file_name": "20170612135150Bh.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20170701235630Lh.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20170804140650Bh.jpeg",
+      "annotators": 3,
+      "GT": 6,
+      "clusters": 11,
+      "maximum_relaxed_profit": 3.169357040801537
+    },
+    {
+      "file_name": "20171004143950Bh.jpeg",
+      "annotators": 2,
+      "GT": 7,
+      "clusters": 9,
+      "maximum_relaxed_profit": 5.791011863327757
+    },
+    {
+      "file_name": "20171005144050Bh.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20171007133730Ch.jpeg",
+      "annotators": 2,
+      "GT": 5,
+      "clusters": 6,
+      "maximum_relaxed_profit": 3.222556390977444
+    },
+    {
+      "file_name": "20171114133730Ch.jpeg",
+      "annotators": 1,
+      "GT": 5,
+      "clusters": 5,
+      "maximum_relaxed_profit": 6.5
+    },
+    {
+      "file_name": "20180202130330Ch.jpeg",
+      "annotators": 3,
+      "GT": 6,
+      "clusters": 17,
+      "maximum_relaxed_profit": 2.6583136824157583
+    },
+    {
+      "file_name": "20180318020350Uh.jpeg",
+      "annotators": 3,
+      "GT": 4,
+      "clusters": 8,
+      "maximum_relaxed_profit": 2.7583312920823477
+    },
+    {
+      "file_name": "20180712123630Ch.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20180825205030Ch.jpeg",
+      "annotators": 3,
+      "GT": 7,
+      "clusters": 15,
+      "maximum_relaxed_profit": 4.862902419557937
+    },
+    {
+      "file_name": "20181014105830Ch.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20181024232430Lh.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20181102104630Ch.jpeg",
+      "annotators": 1,
+      "GT": 1,
+      "clusters": 1,
+      "maximum_relaxed_profit": 1.3
+    },
+    {
+      "file_name": "20190602025430Lh.jpeg",
+      "annotators": 2,
+      "GT": 4,
+      "clusters": 7,
+      "maximum_relaxed_profit": 2.4000000000000004
+    },
+    {
+      "file_name": "20190626025430Lh.jpeg",
+      "annotators": 3,
+      "GT": 5,
+      "clusters": 10,
+      "maximum_relaxed_profit": 3.872519839428059
+    },
+    {
+      "file_name": "20190701123830Ch.jpeg",
+      "annotators": 2,
+      "GT": 5,
+      "clusters": 6,
+      "maximum_relaxed_profit": 3.50931768158474
+    },
+    {
+      "file_name": "20190704123830Ch.jpeg",
+      "annotators": 1,
+      "GT": 2,
+      "clusters": 2,
+      "maximum_relaxed_profit": 2.6
+    },
+    {
+      "file_name": "20190926165810Mh.jpeg",
+      "annotators": 2,
+      "GT": 2,
+      "clusters": 3,
+      "maximum_relaxed_profit": 1.8026431718061677
+    },
+    {
+      "file_name": "20201228202430Ch.jpeg",
+      "annotators": 1,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 5.2
+    },
+    {
+      "file_name": "20210329015250Uh.jpeg",
+      "annotators": 1,
+      "GT": 2,
+      "clusters": 2,
+      "maximum_relaxed_profit": 2.6
+    },
+    {
+      "file_name": "20210621133650Bh.jpeg",
+      "annotators": 1,
+      "GT": 2,
+      "clusters": 2,
+      "maximum_relaxed_profit": 2.6
+    },
+    {
+      "file_name": "20210626133950Bh.jpeg",
+      "annotators": 2,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 2.4000000000000004
+    },
+    {
+      "file_name": "20210728164530Mh.jpeg",
+      "annotators": 1,
+      "GT": 6,
+      "clusters": 6,
+      "maximum_relaxed_profit": 7.8
+    },
+    {
+      "file_name": "20210814044930Lh.jpeg",
+      "annotators": 1,
+      "GT": 4,
+      "clusters": 4,
+      "maximum_relaxed_profit": 5.2
+    },
+    {
+      "file_name": "20220328143550Bh.jpeg",
+      "annotators": 3,
+      "GT": 3,
+      "clusters": 7,
+      "maximum_relaxed_profit": 2.749191207301366
+    },
+    {
+      "file_name": "20220418020950Uh.jpeg",
+      "annotators": 1,
+      "GT": 2,
+      "clusters": 2,
+      "maximum_relaxed_profit": 2.6
+    },
+    {
+      "file_name": "20220724185352Mh.jpeg",
+      "annotators": 1,
+      "GT": 7,
+      "clusters": 7,
+      "maximum_relaxed_profit": 9.1
+    }
+  ]
+}

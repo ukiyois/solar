@@ -1,0 +1,21 @@
+base: configs/flash_large.yaml
+train:
+  output: runs/dual_3090
+  batch_size: 3
+  accumulation: 1
+  workers: 4
+  learning_rate: 0.00015
+  backbone_learning_rate: 0.000015
+  distributed_timeout_minutes: 60
+  log_every: 5
+loss:
+  auxiliary_scale: 0.05
+  weights:
+    pq: 10.0
+  pq_iou_threshold: 0.5
+  pq_iou_temperature: 0.25
+  pq_iou_temperature_final: 0.1
+  pq_score_threshold: 0.35
+  pq_score_temperature: 0.2
+  pq_score_temperature_final: 0.05
+  pq_temperature_epochs: 20

@@ -1,0 +1,82 @@
+{
+  "annotations_measured": 8199,
+  "statistics": {
+    "area_pixels": {
+      "p10": 409.8,
+      "p25": 670.0,
+      "p50": 1228.0,
+      "p75": 2438.0,
+      "p90": 4684.6,
+      "p95": 6946.8,
+      "p99": 13703.44
+    },
+    "oriented_box_long_side_pixels": {
+      "p10": 48.145,
+      "p25": 68.361,
+      "p50": 104.671,
+      "p75": 169.586,
+      "p90": 260.298,
+      "p95": 350.974,
+      "p99": 547.982
+    },
+    "oriented_box_short_side_pixels": {
+      "p10": 14.871,
+      "p25": 20.769,
+      "p50": 30.273,
+      "p75": 45.317,
+      "p90": 65.726,
+      "p95": 83.237,
+      "p99": 132.799
+    },
+    "oriented_box_aspect_ratio": {
+      "p10": 1.927,
+      "p25": 2.626,
+      "p50": 3.611,
+      "p75": 4.879,
+      "p90": 6.237,
+      "p95": 7.108,
+      "p99": 9.154
+    },
+    "skeleton_pixels": {
+      "p10": 48.0,
+      "p25": 75.0,
+      "p50": 128.0,
+      "p75": 222.0,
+      "p90": 364.0,
+      "p95": 489.0,
+      "p99": 831.04
+    },
+    "median_skeleton_width_pixels": {
+      "p10": 5.657,
+      "p25": 6.325,
+      "p50": 8.246,
+      "p75": 11.488,
+      "p90": 15.81,
+      "p95": 18.974,
+      "p99": 30.43
+    },
+    "p10_skeleton_width_pixels": {
+      "p10": 4.0,
+      "p25": 4.0,
+      "p50": 5.657,
+      "p75": 6.325,
+      "p90": 10.0,
+      "p95": 11.899,
+      "p99": 19.791
+    }
+  },
+  "median_instance_width_at_input_sizes": {
+    "2048": 8.246,
+    "1536": 6.185,
+    "1024": 4.123,
+    "768": 3.092,
+    "512": 2.062
+  },
+  "fraction_of_instances_with_median_width_below_native_pixels": {
+    "4": 0.0009,
+    "8": 0.3564,
+    "12": 0.7731,
+    "16": 0.9002
+  },
+  "interpretation": "All 8199 annotator-instance records are weighted equally; duplicated physical filaments across annotators are retained. Width means twice the Euclidean distance to background at a rasterized mask skeleton, not a measured plasma diameter. Oriented box aspect ratio includes bends and branches. Only segmentation polygons are read; provided bbox/spine/category are not used."
+}

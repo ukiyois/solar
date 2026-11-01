@@ -1,0 +1,18 @@
+{
+  "fold": 0,
+  "physical_images": 120,
+  "annotator_records": 192,
+  "GT_instances": 1341,
+  "within_annotator_GT_overlap_pairs": 0,
+  "fractional_Jaccard_upper_bound": 0.8293056951293946,
+  "target": 0.7,
+  "target_certificate_gap": 352.8020584709376,
+  "target_ruled_out_by_this_bound": false,
+  "meaning": "Upper bound on any disjoint single-image prediction shared across all annotator versions. Positive target gap does NOT prove target achievable.",
+  "relaxations": [
+    "Prediction shapes need not be spatially realizable.",
+    "Selected prediction groups may overlap spatially.",
+    "Group selection is fractional, not binary.",
+    "IoU>.5 lower bounds relaxed to >=.5."
+  ]
+}

@@ -1,0 +1,11 @@
+base: configs/v9_e3.yaml
+# E9 (more data): Noisy-Student-style self-training. Each epoch = all fold-0 labelled
+# records + an equal number of pseudo-labelled external GONG archive observations
+# (same instrument as the competition data; teacher: fold-0-only E3 + E6 ensemble with
+# TTA, so fold-0 validation stays free of validation labels). Student keeps the E3
+# noise: arbitrary rotation/scale, photometric jitter, limb-flattened input.
+train:
+  output: runs/v9_e9
+  extra_data_roots: [data/gong_pseudo]
+  extra_per_epoch: 962
+  workers: 12

@@ -1,0 +1,10 @@
+base: configs/v9_e0.yaml
+# E3: limb-darkening-normalized detail channel (zero-initialized) and arbitrary
+# rotation/scale augmentation about the disk center with exact polygon transforms.
+model:
+  detail_flattening: true
+train:
+  output: runs/v9_e3
+  rotate_probability: 0.5
+  scale_jitter: 0.05
+  workers: 10

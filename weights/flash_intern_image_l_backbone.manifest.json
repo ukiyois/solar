@@ -1,0 +1,6 @@
+{
+  "source_sha256": "c694efa31c67cc246d836513080da98861a46a8ba3cee5d0dc6a8074f1a4384d",
+  "sha256": "e26c461dde1841c7199dfaed4583f843c1fdfcc2957cbfc63547fbd57c367cd6",
+  "bytes": 875885855,
+  "transform": "tensor-only state_dict; classification head/conv_head omitted"
+}

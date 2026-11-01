@@ -1,0 +1,219 @@
+{
+ "observations": 706,
+ "skipped_unreadable": [
+  [
+   "20130805135854Bh.jpeg",
+   "TypeError: buffer is too small for requested array"
+  ]
+ ],
+ "setting": "sigma 18.5 Mm, threshold 0.5 G",
+ "pil_pixel_fraction_mean": 0.0025,
+ "GONG_null_random_disk_points": {
+  "n": 306000,
+  "median_mm": 170.6,
+  "within_10mm": 0.024,
+  "within_20mm": 0.051
+ },
+ "GONG_annotated_filaments": {
+  "n": 7306,
+  "median_mm": 54.5,
+  "within_10mm": 0.111,
+  "within_20mm": 0.237
+ },
+ "GONG_annotated_contrast_-1_-0.1": {
+  "n": 3302,
+  "median_mm": 55.6,
+  "within_10mm": 0.107,
+  "within_20mm": 0.227
+ },
+ "GONG_annotated_contrast_-0.1_-0.07": {
+  "n": 2255,
+  "median_mm": 54.9,
+  "within_10mm": 0.109,
+  "within_20mm": 0.24
+ },
+ "GONG_annotated_contrast_-0.07_1": {
+  "n": 1749,
+  "median_mm": 51.2,
+  "within_10mm": 0.122,
+  "within_20mm": 0.252
+ },
+ "GONG_annotated_agreement_0_0.34": {
+  "n": 1689,
+  "median_mm": 55.3,
+  "within_10mm": 0.109,
+  "within_20mm": 0.241
+ },
+ "GONG_annotated_agreement_0.34_0.67": {
+  "n": 788,
+  "median_mm": 53.7,
+  "within_10mm": 0.112,
+  "within_20mm": 0.254
+ },
+ "GONG_annotated_agreement_0.67_1.01": {
+  "n": 2014,
+  "median_mm": 47.8,
+  "within_10mm": 0.123,
+  "within_20mm": 0.241
+ },
+ "HMI_null_random_disk_points": {
+  "n": 47000,
+  "median_mm": 198.8,
+  "within_10mm": 0.018,
+  "within_20mm": 0.039
+ },
+ "HMI_annotated_filaments": {
+  "n": 876,
+  "median_mm": 85.7,
+  "within_10mm": 0.095,
+  "within_20mm": 0.195
+ },
+ "HMI_annotated_contrast_-1_-0.1": {
+  "n": 374,
+  "median_mm": 86.2,
+  "within_10mm": 0.123,
+  "within_20mm": 0.219
+ },
+ "HMI_annotated_contrast_-0.1_-0.07": {
+  "n": 269,
+  "median_mm": 86.2,
+  "within_10mm": 0.078,
+  "within_20mm": 0.182
+ },
+ "HMI_annotated_contrast_-0.07_1": {
+  "n": 233,
+  "median_mm": 84.0,
+  "within_10mm": 0.069,
+  "within_20mm": 0.172
+ },
+ "HMI_annotated_agreement_0_0.34": {
+  "n": 166,
+  "median_mm": 87.2,
+  "within_10mm": 0.09,
+  "within_20mm": 0.193
+ },
+ "HMI_annotated_agreement_0.34_0.67": {
+  "n": 80,
+  "median_mm": 108.0,
+  "within_10mm": 0.013,
+  "within_20mm": 0.05
+ },
+ "HMI_annotated_agreement_0.67_1.01": {
+  "n": 256,
+  "median_mm": 94.5,
+  "within_10mm": 0.121,
+  "within_20mm": 0.223
+ },
+ "ALL_null_random_disk_points": {
+  "n": 353000,
+  "median_mm": 174.2,
+  "within_10mm": 0.023,
+  "within_20mm": 0.049
+ },
+ "ALL_annotated_filaments": {
+  "n": 8182,
+  "median_mm": 56.9,
+  "within_10mm": 0.11,
+  "within_20mm": 0.233
+ },
+ "ALL_annotated_contrast_-1_-0.1": {
+  "n": 3676,
+  "median_mm": 58.4,
+  "within_10mm": 0.109,
+  "within_20mm": 0.227
+ },
+ "ALL_annotated_contrast_-0.1_-0.07": {
+  "n": 2524,
+  "median_mm": 58.3,
+  "within_10mm": 0.106,
+  "within_20mm": 0.234
+ },
+ "ALL_annotated_contrast_-0.07_1": {
+  "n": 1982,
+  "median_mm": 53.5,
+  "within_10mm": 0.116,
+  "within_20mm": 0.243
+ },
+ "ALL_annotated_agreement_0_0.34": {
+  "n": 1855,
+  "median_mm": 58.2,
+  "within_10mm": 0.107,
+  "within_20mm": 0.237
+ },
+ "ALL_annotated_agreement_0.34_0.67": {
+  "n": 868,
+  "median_mm": 55.9,
+  "within_10mm": 0.103,
+  "within_20mm": 0.235
+ },
+ "ALL_annotated_agreement_0.67_1.01": {
+  "n": 2270,
+  "median_mm": 51.3,
+  "within_10mm": 0.123,
+  "within_20mm": 0.239
+ },
+ "fold0_pred_matched": {
+  "n": 565,
+  "median_mm": 56.4,
+  "within_10mm": 0.127,
+  "within_20mm": 0.244
+ },
+ "fold0_pred_near_miss": {
+  "n": 87,
+  "median_mm": 60.3,
+  "within_10mm": 0.161,
+  "within_20mm": 0.253
+ },
+ "fold0_pred_unsupported": {
+  "n": 50,
+  "median_mm": 63.6,
+  "within_10mm": 0.1,
+  "within_20mm": 0.22
+ },
+ "fold0_gt_missed": {
+  "n": 326,
+  "median_mm": 51.8,
+  "within_10mm": 0.132,
+  "within_20mm": 0.23
+ },
+ "enrichment_within_20mm": 4.76,
+ "mu_0.85_1.01_annotated": {
+  "n": 3749,
+  "median_mm": 39.9,
+  "within_10mm": 0.14,
+  "within_20mm": 0.301
+ },
+ "mu_0.85_1.01_random": {
+  "n": 108395,
+  "median_mm": 124.0,
+  "within_10mm": 0.035,
+  "within_20mm": 0.073
+ },
+ "mu_0.85_1.01_enrichment_within_20mm": 4.12,
+ "mu_0.6_0.85_annotated": {
+  "n": 3856,
+  "median_mm": 74.7,
+  "within_10mm": 0.089,
+  "within_20mm": 0.183
+ },
+ "mu_0.6_0.85_random": {
+  "n": 142152,
+  "median_mm": 170.1,
+  "within_10mm": 0.021,
+  "within_20mm": 0.046
+ },
+ "mu_0.6_0.85_enrichment_within_20mm": 3.98,
+ "mu_0_0.6_annotated": {
+  "n": 577,
+  "median_mm": 103.3,
+  "within_10mm": 0.049,
+  "within_20mm": 0.12
+ },
+ "mu_0_0.6_random": {
+  "n": 102453,
+  "median_mm": 258.6,
+  "within_10mm": 0.014,
+  "within_20mm": 0.029
+ },
+ "mu_0_0.6_enrichment_within_20mm": 4.14
+}

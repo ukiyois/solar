@@ -1,0 +1,8 @@
+base: configs/v9_e3.yaml
+# E6: multi-scale training of the backbone view (1024/1152/1280, one size per batch;
+# the detail path is always native). v7 is strongly tied to the 1024 view (zero-shot
+# 1280: 0.356 vs 0.396), so multi-scale TTA needs multi-scale training. 1536 does not
+# fit batch 3 on 24 GB (OOM); 1280 peaks at 21.8 GiB. Validation stays at 1024.
+train:
+  output: runs/v9_e6
+  context_sizes: [1024, 1152, 1280]
