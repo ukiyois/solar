@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
-DOCUMENTS = ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml", "requirements-runtime.txt", ".gitignore",
+DOCUMENTS = ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml", "requirements.txt", ".gitignore",
              ".gitattributes")
 FOLDERS = ("solar_filaments", "scripts", "tests", "configs", "notebooks", "docs", "paper", "research", "third_party")
 BUILD_OUTPUTS = {".pyc", ".aux", ".bbl", ".blg", ".fdb_latexmk", ".fls", ".out", ".synctex.gz"}

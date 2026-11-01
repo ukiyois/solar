@@ -44,7 +44,7 @@ Use Linux with an NVIDIA GPU and a CUDA 12.8 toolkit (nvcc), which the official 
 ```bash
 python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 python -m pip install 'setuptools<=80.9.0' wheel ninja
-python -m pip install -r requirements-runtime.txt
+python -m pip install -r requirements.txt
 python -m pip install -e . --no-build-isolation
 python scripts/build_dcnv4.py          # official DCNv4 CUDA operator (pinned commit 4b848f7)
 python scripts/download_weights.py     # ImageNet FlashInternImage-L backbone (training only)
