@@ -26,6 +26,13 @@ FEATURES = ("area", "parts", "elongation", "width", "solidity", "holes")
 
 
 def describe(rle):
+    """Shape descriptors of one instance mask (pycocotools RLE), as defined in the module docstring.
+
+    area counts every pixel and parts the 8-connected components with >= 32 px; the other descriptors use
+    the largest component: elongation = long / short side of the minimum-area rectangle of its outer contour
+    (short side clamped to >= 1 px), width from the L2 distance transform, solidity against the convex hull of
+    the outer contour, and holes = inner contours of the two-level contour hierarchy.
+    """
     mask = mu.decode(rle).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     sizes = stats[1:, cv2.CC_STAT_AREA]
@@ -42,6 +49,10 @@ def describe(rle):
 
 
 def fold0_job(job):
+    """Pool worker for one fold-0 image: (descriptors of every GT instance of every record, of the predictions).
+
+    The predictions follow the submission rule and are counted once per image, the annotations once per record.
+    """
     stem, records, folders, views, setting = job
     _, kept = predict((stem, folders, views, setting))
     truth = [describe(rle) for _, rles in records for rle in rles]
@@ -49,10 +60,12 @@ def fold0_job(job):
 
 
 def csv_job(counts):
+    """Descriptors of one submission instance, given its RLE counts string (2048 x 2048 mask)."""
     return describe({"size": [2048, 2048], "counts": counts.encode("ascii")})
 
 
 def summarize(rows):
+    """Mean and 10/50/90 % quantiles of every descriptor, plus the shares of multi-part and of holed instances."""
     table = {"instances": len(rows)}
     for key in FEATURES:
         values = np.asarray([r[key] for r in rows], dtype=float)
@@ -64,6 +77,8 @@ def summarize(rows):
 
 
 def plot(populations, out):
+    """Save <out>/shape_statistics.png: normalized histograms of area, width, elongation and solidity per
+    population, and the shares of instances with one part, several parts and holes."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -104,6 +119,7 @@ def plot(populations, out):
 
 
 def main():
+    """Describe the three populations, write shape_statistics.json and draw the figure."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)

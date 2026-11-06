@@ -1,3 +1,14 @@
+"""Native-resolution detail path: the full 2048 px image at strides 2 and 4, conditioned on the context pyramid.
+
+Its inputs are the native channels built by model.forward: intensity, local contrast and, optionally, the
+limb-flattened relative darkness. Each 2x downsampling is an orthogonal 2x2 Haar split that keeps all four
+sub-pixel phases, so the edges of filaments only 6-10 Mm (8-14 px) wide stay resolved. At strides 2 and 4,
+features of the full-disk backbone view are added through learned gates at the exact native pixel-center
+positions, and a curve residual block (solar_filaments.curves) aggregates along bending filament spines.
+Outputs: stride-4 pixel features (feature_dim) for the query decoder and a stride-2 mask basis (mask_dim) for
+native mask rendering. At inference the path runs in tiles with a halo that covers its receptive field, so
+the result equals the full-image computation at bounded memory.
+"""
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -7,7 +18,13 @@ from .curves import CurveResidualBlock
 
 
 def haar_split(x):
-    """Orthogonal, invertible rearrangement of all four 2x2 subpixels."""
+    """Orthogonal, invertible rearrangement of all four 2x2 subpixels.
+
+    B x C x H x W (H, W even) -> B x 4C x H/2 x W/2. For each input channel and 2x2 block with pixels a b / c d
+    (top row a b) the four outputs are (a+b+c+d)/2, (a-b+c-d)/2, (a+b-c-d)/2 and (a-b-c+d)/2: twice the block
+    mean, the left-right and top-bottom differences and the diagonal term. The 4x4 matrix is orthonormal, so
+    nothing is lost before the learned projection that follows (Haar wavelet downsampling, Xu et al. 2023).
+    """
     b, c, h, w = x.shape
     p = F.pixel_unshuffle(x, 2).reshape(b, c, 4, h // 2, w // 2)
     a, b_, c_, d = p.unbind(2)
@@ -16,6 +33,11 @@ def haar_split(x):
 
 
 def haar_inverse(x):
+    """Exact inverse of haar_split: B x 4C x H/2 x W/2 -> B x C x H x W.
+
+    The orthonormal Haar matrix is symmetric, hence its own inverse. The model does not call this function;
+    it documents, and lets one verify, that the split loses no information.
+    """
     b, c4, h, w = x.shape
     ll, lh, hl, hh = x.reshape(b, c4 // 4, 4, h, w).unbind(2)
     p = torch.stack((ll + lh + hl + hh, ll - lh + hl - hh,
@@ -24,6 +46,12 @@ def haar_inverse(x):
 
 
 class DetailDownsample(nn.Module):
+    """2x downsampling of the detail path, B x cin x H x W -> B x cout x H/2 x W/2.
+
+    method 'haar': haar_split, then a 1x1 ConvNormAct that mixes the 4 * cin Haar channels;
+    'stride': a 3x3 stride-2 ConvNormAct.
+    """
+
     def __init__(self, cin, cout, method):
         super().__init__()
         self.method = method
@@ -36,6 +64,9 @@ class DetailDownsample(nn.Module):
 def sample_context(context, bounds, full_size, output_size):
     """Native pixel centers -> the FlashInternImage stride-4 stem anchors.
 
+    Resamples context (B x C x h x w at stride 4 of the view) at the native pixel centers of an output_size grid
+    that covers the crop bounds = (y0, x0, y1, x1) of a full_size = (H, W) image, so every tile reads exactly
+    the context values of the full-image computation. Bilinear, border padding, float32.
     Two 3x3/stride-2/pad-1 convolutions keep the first anchor at view pixel .5,
     rather than at the stride-4 cell center 2. This is a .375-feature-cell shift.
     The original-image resize affine is included via full_size/context.shape.
@@ -58,6 +89,7 @@ def upsample_stem_aligned(source, size):
 
     Target index j maps to source j/2, not j/2-.25 as in an ordinary 2x resize.
     This preserves the same anchor through the top-down context pyramid.
+    Bilinear resampling of source (B x C x h x w) to size, border padding, float32.
     """
     h, w = source.shape[-2:]
     oh, ow = size
@@ -71,6 +103,13 @@ def upsample_stem_aligned(source, size):
 
 
 class ContextPyramid(nn.Module):
+    """FPN-style top-down pyramid over the four backbone stages, all with dim channels.
+
+    Each level is a 1x1 lateral projection of its stage plus the anchor-aligned upsampling of the next coarser
+    output, refined by a separable residual block. forward returns the levels finest first (strides 4, 8, 16
+    and 32 of the view).
+    """
+
     def __init__(self, channels, dim):
         super().__init__()
         self.lateral = nn.ModuleList([nn.Conv2d(c, dim, 1) for c in channels])
@@ -89,6 +128,14 @@ class ContextPyramid(nn.Module):
 
 
 class ContextGate(nn.Module):
+    """Adds full-disk context to local detail features through a learned sigmoid gate.
+
+    out = local + strength * sigmoid(W [local, c]) * c, where c is the context projected to the local width
+    (1x1) and resampled at the native pixel centers of the local cells (sample_context). strength is a learned
+    scalar, initialized to 0.1. forward: local B x channels x h x w (a crop at bounds of a full_size image);
+    context is the finest pyramid level, or its projection when projected=True.
+    """
+
     def __init__(self, dim, channels):
         super().__init__()
         self.project = nn.Conv2d(dim, channels, 1)
@@ -105,6 +152,14 @@ class ContextGate(nn.Module):
 
 
 class NativeDetailPath(nn.Module):
+    """Native-resolution features at strides 2 and 4 of the image, conditioned on the context pyramid.
+
+    Stride 2 (c = detail_channels): 2x downsampling (Haar split by default), context gate, curve residual
+    block. Stride 4 (2c channels): the same three steps. output4 and a last context gate (context4, initial
+    strength 1.0) give the stride-4 pixel features read by the decoder; mask4, mask2 and output2 give the
+    stride-2 mask basis from the stride-2 features plus the bilinearly upsampled stride-4 features.
+    """
+
     def __init__(self, config):
         super().__init__()
         c = config.detail_channels
@@ -125,14 +180,23 @@ class NativeDetailPath(nn.Module):
         self.checkpointing = config.detail_checkpointing
 
     def apply_curve(self, block, features):
+        """Run a curve block, with activation checkpointing in training when detail_checkpointing is set."""
         if self.training and self.checkpointing and features.requires_grad:
             return checkpoint(block, features, use_reentrant=False)
         return block(features)
 
     def project_context(self, context):
+        """1x1 context projections of the three gates; computed once per image and shared by all tiles."""
         return self.gate2.project(context), self.gate4.project(context), self.context4.project(context)
 
     def forward(self, image, context, bounds, full_size, projected_context=None):
+        """Detail features of one native crop (the whole image when untiled).
+
+        image: B x inputs x h x w crop of the native input channels located at bounds = (y0, x0, y1, x1) in a
+        full_size = (H, W) image; h and w are multiples of 4. context: the finest pyramid level;
+        projected_context: its projections from project_context. Returns (pixels4 B x feature_dim x h/4 x w/4,
+        mask basis B x mask_dim x h/2 x w/2).
+        """
         p2, p4, semantic = self.project_context(context) if projected_context is None else projected_context
         x2 = self.apply_curve(self.curve2, self.gate2(self.stem(image), p2, bounds, full_size, projected=True))
         x4 = self.apply_curve(self.curve4, self.gate4(self.down(x2), p4, bounds, full_size, projected=True))
@@ -142,6 +206,13 @@ class NativeDetailPath(nn.Module):
         return pixels4, mask2
 
     def tiled(self, image, context, tile, halo):
+        """Inference-only forward over tile x tile cores, each computed from a crop with a halo-px margin.
+
+        Only each core is written to the output. With a halo that covers the receptive field (ModelConfig
+        enforces a minimum) and tile and halo multiples of 4, so that crops align with the stride-2 and
+        stride-4 grids, the result equals the full-image forward up to rounding (tested), while activation
+        memory depends only on the tile size. Same outputs as forward for the whole image.
+        """
         if self.training and torch.is_grad_enabled():
             raise RuntimeError("Tiled detail assembly is inference-only; training uses the complete differentiable path")
         b, _, h, w = image.shape
@@ -150,7 +221,8 @@ class NativeDetailPath(nn.Module):
         output4 = image.new_zeros(b, self.feature_dim, h // 4, w // 4, dtype=context.dtype)
         output2 = image.new_zeros(b, self.mask_dim, h // 2, w // 2, dtype=context.dtype)
         projected = self.project_context(context)
-        # Read overlapping halo, keep only disjoint cores. IDs are never generated per tile.
+        # Read overlapping halo, keep only disjoint cores. IDs are never generated per tile:
+        # tiles produce features only, and the decoder sees the assembled full-image maps.
         for y0 in range(0, h, tile):
             for x0 in range(0, w, tile):
                 y1, x1 = min(h, y0 + tile), min(w, x0 + tile)
@@ -158,6 +230,7 @@ class NativeDetailPath(nn.Module):
                 by, bx, ey, ex = bounds
                 f4, f2 = self(image[..., by:ey, bx:ex], context, bounds, (h, w), projected)
                 for stride, source, destination in ((4, f4, output4), (2, f2, output2)):
+                    # Offset and size of the core inside the crop, in cells of this stride.
                     sy, sx = (y0 - by) // stride, (x0 - bx) // stride
                     hh, ww = (y1 - y0) // stride, (x1 - x0) // stride
                     destination[..., y0 // stride:y1 // stride, x0 // stride:x1 // stride] = source[..., sy:sy + hh, sx:sx + ww]

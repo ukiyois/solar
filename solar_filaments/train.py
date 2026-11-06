@@ -33,6 +33,11 @@ from .piloting import prepare_mask_pilots
 
 
 def seed_everything(seed):
+    """Seed Python, NumPy (seed mod 2**32), PyTorch and every CUDA device.
+
+    main() seeds with seed + rank at start-up and with seed + 10000 * epoch + rank before every epoch, so
+    ranks draw different random numbers and an epoch's draws do not depend on earlier epochs.
+    """
     random.seed(seed)
     np.random.seed(seed % (2**32))
     torch.manual_seed(seed)
@@ -41,6 +46,12 @@ def seed_everything(seed):
 
 
 def seed_worker(worker_id):
+    """DataLoader worker_init_fn: seed Python and NumPy from the worker's torch seed; one CPU thread per worker.
+
+    PyTorch seeds each worker with base_seed + worker_id, so workers do not share random streams.
+    FilamentDataset itself draws its augmentation from per-(epoch, index) generators, independent of the
+    worker that loads a sample. One intra-op thread per worker avoids oversubscribing the CPU.
+    """
     seed = torch.initial_seed() % (2**32)
     random.seed(seed)
     np.random.seed(seed)
@@ -48,10 +59,17 @@ def seed_worker(worker_id):
 
 
 def save_atomic(value, destination):
+    """torch.save to a temporary file next to `destination` (suffix .tmp), then rename it over the destination.
+
+    A crash or a full disk never leaves a truncated checkpoint, and the previous file survives a failed save.
+    Free space is checked first against the bytes of all distinct tensor storages plus 64 MiB (OSError if
+    short); the temporary file is always removed.
+    """
     destination = Path(destination)
     temporary = destination.with_suffix(".tmp")
     storages = {}
     def measure(item):
+        """Record the byte size of every tensor storage in nested dicts, lists and tuples (shared ones once)."""
         if isinstance(item, torch.Tensor):
             storage = item.untyped_storage()
             storages[(str(item.device), storage.data_ptr())] = storage.nbytes()
@@ -114,6 +132,17 @@ def backbone_layer_id(name, depths):
 
 
 def optimizer_groups(model, settings):
+    """AdamW parameter groups with layer-wise learning rates and selective weight decay.
+
+    Backbone parameters (backbone.encoder.*) use backbone_learning_rate times stage_lr_decay ** (3 - stage),
+    where downsampling layers and stage norms count with the next stage, or, if layer_lr_decay is set, times
+    layer_lr_decay per block below the deepest one (backbone_layer_id). The backbone's DCN offset/mask
+    projections get a further offset_lr_scale (default 0.1), so the small dataset does not disturb the
+    pretrained sampling patterns. All other parameters use learning_rate. Weight decay applies to weight
+    matrices and kernels only, not to biases, 1-d (norm, layer-scale) parameters or the query and level
+    position embeddings. Parameters with the same (rate, decay) share a group; initial_lr keeps the group's
+    base rate for the warmup/cosine schedule.
+    """
     groups = {}
     stage_decay = settings.get("stage_lr_decay", .8)
     layer_decay = settings.get("layer_lr_decay")
@@ -145,6 +174,10 @@ def optimizer_groups(model, settings):
 
 
 def lr_factor(step, warmup, total, minimum=.02):
+    """Learning-rate multiplier: linear warmup to 1 over `warmup` steps, then cosine decay to `minimum`.
+
+    The factor reaches `minimum` at step total - 1 and stays there.
+    """
     if step < warmup:
         return (step + 1) / max(1, warmup)
     progress = min(1., (step - warmup) / max(1, total - warmup - 1))
@@ -153,6 +186,13 @@ def lr_factor(step, warmup, total, minimum=.02):
 
 @torch.inference_mode()
 def validate(model, dataset, device, inference, workers=0, report_path=None):
+    """Official PQ of the model on a dataset at one operating point (the config's `inference` settings).
+
+    Records of the same physical image share one forward (tiled native path, FP16 autocast when amp is on).
+    inference.instance_predictions selects the instances; every annotator record is scored separately with
+    metrics.official_pq and the counts are pooled with metrics.aggregate_pq. report_path receives the
+    per-record rows as JSON. Returns the pooled metrics plus the numbers of records and physical images.
+    """
     model.eval()
     scores, by_file, unique_indices = [], {}, []
     for index, record in enumerate(dataset.records):
@@ -240,6 +280,7 @@ def validate_grid(model, dataset, device, inference, grid, report_path=None):
 
 
 def run_validation(model, dataset, device, document, train, report_path):
+    """validate_grid() if train.validation_grid is configured, else validate() at the inference settings."""
     grid = train.get("validation_grid")
     if grid:
         return validate_grid(model, dataset, device, document.get("inference", {}), grid, report_path)
@@ -253,6 +294,16 @@ def selection_score(validation):
 
 
 def main():
+    """Train one stage from a YAML config (command line in the module docstring).
+
+    Each epoch passes every labelled record, plus extra_per_epoch pseudo-labelled frames when
+    extra_data_roots is set, through photometric jitter, an optional random backbone view size
+    (context_sizes), the model (with mask pilots if configured) and FilamentCriterion. Each optimizer step
+    clips the gradient norm, follows the warmup/cosine schedule and, unless the FP16 GradScaler skipped the
+    step, updates the EMA. Rank 0 writes last.pt every epoch (training weights, optimizer, scaler and EMA
+    state, for --resume) and either final.pt (EMA weights, when validation is off) or best.pt (EMA weights
+    with the best validation selection score).
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/flash_large.yaml")
     parser.add_argument("--resume")
@@ -279,6 +330,7 @@ def main():
     train["accumulation"] = 1
     if config.backbone == "large" and (not torch.cuda.is_available() or config.dcn_backend != "native" or native_function() is None):
         raise RuntimeError("Large-model training requires the official accelerated CUDA DCNv4 backend")
+    # torchrun sets WORLD_SIZE, RANK and LOCAL_RANK; without them this is a single-process run.
     world, rank, local_rank = int(os.getenv("WORLD_SIZE", "1")), int(os.getenv("RANK", "0")), int(os.getenv("LOCAL_RANK", "0"))
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -322,6 +374,7 @@ def main():
         del initial
     resume = torch.load(args.resume, map_location="cpu", weights_only=True, mmap=True) if args.resume else None
     if resume:
+        # Operational fields (weights path, DCN backend, checkpointing, tiling) may differ; the architecture may not.
         operational = {"pretrained", "dcn_backend", "backbone_checkpointing", "detail_checkpointing", "detail_tile", "detail_halo"}
         if {k: v for k, v in config_dict(checkpoint_config(resume['model_config'])).items() if k not in operational} != {k: v for k, v in config_dict(config).items() if k not in operational}:
             raise ValueError("Resume architecture differs from the saved model")
@@ -375,6 +428,7 @@ def main():
     updates_per_epoch = math.ceil(len(loader) / accumulation)
     total_steps = train["epochs"] * updates_per_epoch
     warmup = max(1, train["warmup_epochs"] * updates_per_epoch)
+    # Score the starting weights first, so best.pt is replaced only if training improves on them.
     if rank == 0 and train.get('validate_before_training', False) and not args.resume:
         training_forward = unwrapped.forward
         unwrapped.forward = eager_forward
@@ -407,6 +461,7 @@ def main():
                 break
             images = photometric(images, train)
             criterion.set_progress(epoch + step / len(loader))
+            # accumulation is fixed to 1 above, so every batch is one optimizer step.
             update = (step + 1) % accumulation == 0 or step + 1 == len(loader)
             group_size = min(accumulation, len(loader) - (step // accumulation) * accumulation)
             sync_context = model.no_sync() if world > 1 and not update else nullcontext()
@@ -419,6 +474,7 @@ def main():
                                else model(images, **view))
                 losses = criterion(outputs, targets)
                 loss = sum(losses.values()) / group_size
+                # Device-side check: stops on a non-finite loss without a host synchronization every step.
                 torch._assert_async(torch.isfinite(loss), "Nonfinite training loss")
                 scaler.scale(loss).backward()
             keys = list(losses)
@@ -430,6 +486,8 @@ def main():
                 factor = lr_factor(global_step, warmup, total_steps, train.get("minimum_lr_ratio", .02))
                 for group in optimizer.param_groups:
                     group["lr"] = group["initial_lr"] * factor
+                # The GradScaler lowers its scale when it skips a step with non-finite gradients; a skipped
+                # step advances neither the schedule nor the EMA.
                 old_scale = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
@@ -452,6 +510,7 @@ def main():
                                   "global_images_per_second": (step + 1) * train["batch_size"] * world / (time.perf_counter() - started),
                                   "images_per_second": (step + 1) * train["batch_size"] / (time.perf_counter() - started)}), flush=True)
             del outputs, losses, loss, images, targets
+        # Epoch loss sums averaged over ranks, for the history log.
         if world > 1:
             dist.all_reduce(sums)
             sums /= world
@@ -460,6 +519,7 @@ def main():
         peak = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else None
         if rank == 0:
             validation = None
+            # Called inside ema.apply() for final.pt and best.pt, whose 'model' then holds the EMA weights.
             def metadata():
                 return {"model": unwrapped.state_dict(), "model_config": config_dict(config), "epoch": epoch,
                         "global_step": global_step, "task_trained": global_step > 0,
@@ -494,6 +554,7 @@ def main():
             with (folder / "history.jsonl").open("a", encoding="utf-8") as log:
                 log.write(json.dumps(record) + "\n")
             print(json.dumps(record), flush=True)
+            # last.pt (for --resume): training weights with optimizer, scaler and EMA state.
             state = {**metadata(), "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "best_pq": best,
                      "train_settings": train, 'validation': validation, 'inference_settings': document.get('inference', {})}
             if ema:

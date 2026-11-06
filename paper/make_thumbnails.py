@@ -5,6 +5,8 @@ instance masks of a submission file, filled in distinct colours.
 
 usage (repository root): python paper/make_thumbnails.py --csv <submission.csv> [--stem <test image stem>]
 Without --stem, the test observation with the largest total predicted area is used.
+Outputs (SIZE x SIZE px): arch_input.png (the image), arch_contrast.png (local contrast 4 (I - 15 x 15 mean)),
+arch_darkness.png (limb-flattened relative darkness) and arch_output.png (instances dilated by 9 x 9 px).
 """
 import argparse
 import csv
@@ -31,12 +33,14 @@ COLORS = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130
 
 
 def save(array, name, low, high):
+    """Map `array` linearly from [low, high] to 8-bit grey (clipped) and save it as OUT/name, SIZE x SIZE px."""
     scaled = np.clip((np.asarray(array, np.float32) - low) / (high - low), 0, 1)
     image = Image.fromarray((scaled * 255).astype(np.uint8))
     image.resize((SIZE, SIZE), Image.LANCZOS).save(OUT / name)
 
 
 def main():
+    """Write the four thumbnails of one test observation to paper/figures."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--csv", required=True)
     parser.add_argument("--stem")

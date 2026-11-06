@@ -1,9 +1,19 @@
+"""Competition metric: Panoptic Quality (Kirillov et al., CVPR 2019) per annotator record, pooled over records.
+
+A GT/prediction pair with IoU > 0.5 is a true positive, and PQ = sum of TP IoUs / (TP + FP/2 + FN/2) = SQ * RQ.
+A prediction is scored separately against every annotator record of its observation.
+"""
 import numpy as np
 from pycocotools import mask as mask_utils
 
 
 def official_pq(predictions, ground_truth):
-    """Organizer self-evaluation convention: every pair with IoU strictly > .5."""
+    """Organizer self-evaluation convention: every pair with IoU strictly > .5.
+
+    predictions, ground_truth: lists of COCO RLEs of one annotator record. With non-overlapping masks an
+    IoU > 0.5 match is unique (Kirillov et al.), so no assignment step is needed. Returns pq, sq, rq and the
+    raw counts tp, fp, fn, iou_sum that aggregate_pq pools.
+    """
     if predictions and ground_truth:
         ious = np.asarray(mask_utils.iou(predictions, ground_truth, [0] * len(ground_truth)))
         matches = ious > 0.5
@@ -21,6 +31,11 @@ def official_pq(predictions, ground_truth):
 
 
 def aggregate_pq(scores):
+    """Pool official_pq rows: TP, FP, FN and matched IoU are summed over all records before dividing.
+
+    This is the competition aggregation, under which records with many filaments weigh more; the plain mean
+    of the per-record PQ is reported separately as mean_record_pq.
+    """
     tp, fp, fn = (sum(row[key] for row in scores) for key in ("tp", "fp", "fn"))
     denominator = tp + 0.5 * fp + 0.5 * fn
     iou_sum = sum(row['iou_sum'] for row in scores)

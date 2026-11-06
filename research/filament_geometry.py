@@ -1,4 +1,14 @@
-"""Measure apparent filament geometry using segmentation polygons only."""
+"""Measure apparent filament geometry using segmentation polygons only.
+
+Every annotated instance of the training JSON (all annotator records) is rasterized and measured: pixel area,
+the sides and aspect ratio of the minimum-area rectangle around its vertices, the skeleton length, and the
+median and 10th-percentile width (twice the distance to the background at skeleton pixels). The summary has
+quantiles of every measure, the median width rescaled to smaller input sizes (how many pixels a typical
+filament spans after downsampling) and the share of instances whose median width is below 4 / 8 / 12 / 16
+native pixels. Written to research/filament_geometry.json.
+
+usage: python research/filament_geometry.py
+"""
 
 import json
 from pathlib import Path
@@ -16,6 +26,7 @@ OUTPUT = Path(__file__).with_name("filament_geometry.json")
 
 
 def quantiles(values):
+    """10/25/50/75/90/95/99th percentiles of `values` as {"p10": ..., "p99": ...}, rounded to 3 decimals."""
     values = np.asarray(values, dtype=np.float64)
     return {
         f"p{p}": round(float(np.percentile(values, p)), 3)
@@ -31,6 +42,7 @@ for annotation in data["annotations"]:
     if not polygons:
         continue
     vertices = np.concatenate(polygons)
+    # rasterize in a local window around the vertices (3 px margin) instead of the full 2048 x 2048 frame
     origin = np.floor(vertices.min(axis=0)).astype(int) - 3
     end = np.ceil(vertices.max(axis=0)).astype(int) + 3
     width, height = (end - origin + 1).tolist()

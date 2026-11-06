@@ -5,6 +5,14 @@ observation (any site). Test images: the same gap to any train image. Fused TTA
 predictions (same rule as the submission) are scored per validation image and
 aggregated for 'near' (< --hours) and 'far' images, plus a reweighting of the two
 groups to the test set's near/far mix.
+
+Also reported: PQ by the number of annotator records per image. --votes is a fraction of all voters. The
+defaults (votes .111, score .12, mask .65) differ from the final submission setting (votes 1/8, score .10,
+mask .40); pass that setting explicitly to analyse the submitted rule. Output JSON: summary plus the gap in
+hours of every validation and test image.
+
+usage: python -m scripts.neighbor_split_pq --folders runs/tta/<name>/val --folder-views d0,d1,d2,d3,f0,f1,f2,f3 \
+           --output <near_far.json>
 """
 import argparse
 import datetime as dt
@@ -21,10 +29,12 @@ ROOT = Path("data/raw/MAGFiLO_1.0_Kaggle_2026")
 
 
 def stamp(name):
+    """Observation time of a file name that starts with YYYYMMDDhhmmss."""
     return dt.datetime.strptime(name[:14], "%Y%m%d%H%M%S")
 
 
 def gaps(targets, pool):
+    """{target file name: hours to the nearest observation in `pool`, from any site}."""
     times = sorted(stamp(n) for n in pool)
     result = {}
     for name in targets:
@@ -34,6 +44,10 @@ def gaps(targets, pool):
 
 
 def score(job):
+    """Pool worker: official PQ rows (one per annotator record) of one fold-0 image under the submission rule.
+
+    job = (stem, [(record id, GT RLEs)], folders, views, (votes, score, mask)); returns (stem, rows).
+    """
     stem, records, folders, views, setting = job
     crops, voters = pooled_candidates(stem, folders, views)
     votes, s, m = setting
@@ -42,6 +56,7 @@ def score(job):
 
 
 def main():
+    """Split fold 0 by time gap, score both groups and reweight them to the test set's near/far mix."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)

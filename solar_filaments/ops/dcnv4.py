@@ -3,6 +3,11 @@
 The reference follows OpenGVLab CUDA's group-major [2*K offsets, K weights]
 packing, x-major kernel ordering, scaled base dilation and unnormalized weights.
 It is for portability/debugging; it is not the accelerated DCNv4 kernel.
+
+DCNv4 (Xiong et al., CVPR 2024) is the deformable convolution of the FlashInternImage backbone: every pixel
+reads K = 9 bilinear samples per channel group at learned offsets around it and sums them with learned,
+unnormalized weights. The DCNv4 module keeps the official parameter names, so the ImageNet checkpoint loads
+unchanged; its `backend` selects the official CUDA kernel (via solar_filaments.ops.native) or the reference.
 """
 import importlib
 import math
@@ -13,11 +18,17 @@ from torch import nn
 from torch.nn import functional as F
 from .native import dcnv4_cuda
 
+# The slow-reference warning is issued once per process.
 _warned = False
 
 
 @lru_cache(maxsize=1)
 def native_function():
+    """The official DCNv4 autograd Function if the compiled extension imports, else None (cached).
+
+    Serves as the availability probe of the CUDA backend and as the upstream operator that the tests compare
+    with the reference. Importing it replaces upstream's backward launch heuristic by safe_backward_spec.
+    """
     try:
         module = importlib.import_module("DCNv4.functions.dcnv4_func")
         # Upstream's uncached heuristic can request 1280 backward threads for
@@ -31,6 +42,12 @@ def native_function():
 
 @lru_cache(maxsize=256)
 def safe_backward_spec(batch, height, width, groups, group_channels):
+    """(d_stride, threads per block) for the upstream DCNv4 backward kernel, never more than 256 threads.
+
+    d_stride is the number of channels per thread: upstream's 1 or 2, doubled (up to 8) while one position
+    needs more than 256 threads (groups * group_channels / d_stride). A block then covers the largest number
+    of positions (a divisor of batch * height * width, at most 64) that fits in 256 threads.
+    """
     stride = 2 if group_channels >= 64 else 1
     while groups * group_channels // stride > 256:
         stride *= 2
@@ -44,6 +61,15 @@ def safe_backward_spec(batch, height, width, groups, group_channels):
 
 def dcnv4_reference(value, offset_mask, group, offset_scale=1.0, kernel=3,
                     remove_center=False, group_chunk=4):
+    """Differentiable PyTorch DCNv4 with the CUDA kernel's conventions: B x H x W x C in, same shape out.
+
+    value: channels-last features, C = group x group channels. offset_mask: B x H x W x (>= group * K * 3), per
+    group [dx_0, dy_0, ..., dx_(K-1), dy_(K-1), w_0, ..., w_(K-1)] for the K = kernel^2 samples (one fewer
+    with remove_center); trailing padding channels are ignored. Sample k at pixel p is read bilinearly, zero
+    outside the map, at p + (base_k + (dx_k, dy_k)) * offset_scale, base_k being the (x, y) offset of kernel
+    cell k in x-major order (x varies slowest); the output is sum_k w_k * sample_k, without softmax.
+    group_chunk groups are processed at a time to bound the memory of the sample volume.
+    """
     b, h, w, channels = value.shape
     k = kernel * kernel - int(remove_center)
     dim = channels // group
@@ -77,6 +103,14 @@ def dcnv4_reference(value, offset_mask, group, offset_scale=1.0, kernel=3,
 
 
 class DCNv4(nn.Module):
+    """DCNv4 layer with the parameters (names and shapes) of the official module, so checkpoints load.
+
+    Only the spatial configuration of FlashInternImage is supported: stride 1, same padding, dilation 1.
+    Per pixel, a linear layer (after an optional depthwise convolution) predicts the offsets and weights of
+    the samples, padded to a multiple of 8 channels as the CUDA kernel expects. `backend`: 'native' (CUDA
+    kernel; error if unavailable), 'reference' (dcnv4_reference) or 'auto' (native on CUDA when built).
+    """
+
     def __init__(self, channels=64, kernel_size=3, stride=1, pad=1, dilation=1,
                  group=4, offset_scale=1.0, dw_kernel_size=None,
                  center_feature_scale=False, remove_center=False,
@@ -106,6 +140,7 @@ class DCNv4(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
+        """Upstream initialization: zero offsets and weights, Xavier-uniform value and output projections."""
         nn.init.zeros_(self.offset_mask.weight)
         nn.init.zeros_(self.offset_mask.bias)
         if not self.without_pointwise:
@@ -115,6 +150,7 @@ class DCNv4(nn.Module):
                     nn.init.zeros_(layer.bias)
 
     def forward(self, input, shape=None):
+        """input: B x L x C tokens of an H x W map, shape = (H, W) (square if None); returns B x L x C."""
         global _warned
         b, length, c = input.shape
         h, w = shape if shape is not None else (math.isqrt(length), math.isqrt(length))
@@ -140,6 +176,7 @@ class DCNv4(nn.Module):
                 _warned = True
             result = dcnv4_reference(value, packed, self.group, self.offset_scale,
                                      self.kernel_size, self.remove_center)
+        # Optional upstream blend of the result with the value projection (off in FlashInternImage).
         if self.center_feature_scale:
             scale = F.linear(result, self.center_feature_scale_proj_weight,
                              self.center_feature_scale_proj_bias).sigmoid().repeat_interleave(self.group_channels, -1)

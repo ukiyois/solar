@@ -13,7 +13,11 @@ from .masks import fine_mask_logits
 
 @torch.no_grad()
 def query_probabilities(output, index=0, min_score=.05, chunk=8, original_size=None, dtype=torch.float16):
-    """Native probabilities (FP16 by default) for queries whose class*quality score >= min_score."""
+    """Native probabilities (FP16 by default) for queries whose class*quality score >= min_score.
+
+    Returns (scores K, probabilities K x H x W) in descending score order; original_size crops the padding.
+    Rendering once at the lowest score threshold of a sweep serves every operating point.
+    """
     scores = (output["pred_logits"][index].float().softmax(-1)[:, 0] *
               output["pred_quality"][index].float().sigmoid())
     ids = torch.where(scores >= min_score)[0]
@@ -32,7 +36,12 @@ def query_probabilities(output, index=0, min_score=.05, chunk=8, original_size=N
 
 @torch.no_grad()
 def owned_masks(scores, probabilities, score_threshold, mask_threshold, min_area=32, min_retained_fraction=.5):
-    """Boolean instance masks and scores after exclusive pixel ownership."""
+    """Boolean instance masks and scores after exclusive pixel ownership.
+
+    Same rule as inference.instance_predictions at one (score_threshold, mask_threshold) pair. scores and
+    probabilities come from query_probabilities (descending score). Returns (K x H x W bool masks, final
+    scores).
+    """
     h, w = probabilities.shape[-2:]
     winning = probabilities.new_zeros((h, w), dtype=torch.float32)
     labels = torch.full((h, w), -1, dtype=torch.int32, device=probabilities.device)
@@ -67,6 +76,7 @@ def owned_masks(scores, probabilities, score_threshold, mask_threshold, min_area
 
 
 def decode_truth(annotations, height, width, device):
+    """GT instance masks of one annotator record (COCO polygons) as an N x H x W bool tensor on `device`."""
     masks = []
     for annotation in annotations:
         rles = mask_utils.frPyObjects(annotation["segmentation"], height, width)
@@ -79,7 +89,11 @@ def decode_truth(annotations, height, width, device):
 
 @torch.no_grad()
 def pq_counts(prediction, truth, chunk=8):
-    """Organizer PQ terms: TP iff IoU strictly > .5 (one-to-one by construction)."""
+    """Organizer PQ terms: TP iff IoU strictly > .5 (one-to-one by construction).
+
+    prediction: K x H x W bool, truth: N x H x W bool, on the same device. Returns this record's matched IoU
+    sum and TP/FP/FN counts, the terms of metrics.official_pq.
+    """
     k, n = len(prediction), len(truth)
     if k == 0 or n == 0:
         return {"iou_sum": 0.0, "tp": 0, "fp": k, "fn": n}
@@ -97,6 +111,7 @@ def pq_counts(prediction, truth, chunk=8):
 
 
 def summarize(rows):
+    """Pool per-record pq_counts like metrics.aggregate_pq: PQ = sum of TP IoUs / (TP + FP/2 + FN/2)."""
     tp, fp, fn = (sum(r[k] for r in rows) for k in ("tp", "fp", "fn"))
     iou = sum(r["iou_sum"] for r in rows)
     denominator = tp + .5 * fp + .5 * fn

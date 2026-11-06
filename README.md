@@ -16,7 +16,7 @@ At test time, 8 rotations/flips of the image are fused.
 
 **End to end:** [`notebooks/end_to_end.ipynb`](notebooks/end_to_end.ipynb) runs the whole pipeline. It covers installation, data and weight checks, the unit tests, test inference with 8-view TTA, fusion, the validated submission file and morphology figures. It also shows the judging metrics and analyses (recomputed with a fold-0 model on request) and contains the complete training chain behind a flag.
 
-**Full description:** [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL_REPORT.md). It covers preprocessing, architecture, objective, training stages, self-training and compliance, inference, the judging metrics (Dice/IoU distributions, one-to-many and many-to-one relations), morphology, the label-visibility analysis, negative results and reproduction. The 4-page paper (IEEE conference format) is in [`paper/`](paper/).
+**Full description:** [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL_REPORT.md). It covers preprocessing, architecture, objective, training stages, self-training and compliance, inference, the judging metrics (Dice/IoU distributions, one-to-many and many-to-one relations), morphology, the label-visibility analysis, negative results and reproduction. The 4-page report, written in the organizers' Overleaf template, is in [`paper/`](paper/).
 
 ## Repository layout
 
@@ -30,7 +30,7 @@ scripts/           setup, archive download + pseudo-labelling, TTA dump + fusion
 notebooks/         end_to_end.ipynb: the whole pipeline in one notebook
 tests/             33 unit tests (CPU; 2 need the DCNv4 CUDA extension)
 docs/              technical report, figures, analysis outputs
-paper/             4-page report (LaTeX, IEEEtran conference class) and its figures
+paper/             4-page report in the organizers' Overleaf template (ACM acmart sigconf) and its figures
 research/          inter-annotator agreement, label visibility, magnetogram / polarity-inversion-line check,
                    dataset geometry, PQ upper bound (see research/README.md)
 third_party/       pinned official DCNv4 CUDA operator source (built by scripts/build_dcnv4.py)
@@ -42,9 +42,7 @@ weights/           final_a.pt (submitted model, released separately), ImageNet b
 Use Linux with an NVIDIA GPU and a CUDA 12.8 toolkit (nvcc), which the official DCNv4 kernel needs. The project was verified with Python 3.10 and PyTorch 2.10.0 + cu128.
 
 ```bash
-python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install 'setuptools<=80.9.0' wheel ninja
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt      # every package, pinned (PyTorch from the cu128 wheel index)
 python -m pip install -e . --no-build-isolation
 python scripts/build_dcnv4.py          # official DCNv4 CUDA operator (pinned commit 4b848f7)
 python scripts/download_weights.py     # ImageNet FlashInternImage-L backbone (training only)
@@ -74,7 +72,7 @@ python -m scripts.fuse_tta --folders runs/tta/final_a/test --votes 0.125 --score
 python scripts/validate_submission.py submission.csv
 ```
 
-The submitted file is `submission_final_a.csv` in the release (SHA-256 `d5896cfb…c20bf1e`, 1,072 instances on 179 of 180 images, public PQ 0.40). For a quick single-view prediction (PNG label maps + CSV), use `python -m solar_filaments.predict --checkpoint weights/final_a.pt --input <images>`.
+The submitted file is `submission_final_a.csv` in the release (SHA-256 `d5896cfb…c20bf1e`, 1,072 instances on 179 of 180 images, public PQ 0.40). For a quick single-view prediction (PNG label maps + CSV), use `python -m solar_filaments.predict --checkpoint weights/final_a.pt --input <images>`. Its thresholds come from `--config` (default `configs/local.yaml`). It is a quick look, not the submission setting: one view instead of eight, and without the TTA fusion.
 
 ## Reproduce training
 
@@ -117,7 +115,8 @@ A single GPU works as well (`python -m solar_filaments.train ...`). The batch is
 ```bash
 python -m scripts.dump_tta_candidates --checkpoint <fold-0 model> --split val --output runs/tta/<name>/val
 V="--folders runs/tta/<name>/val --folder-views d0,d1,d2,d3,f0,f1,f2,f3 --votes 1 --score .10 --mask .40"
-python -m scripts.rubric_metrics $V --output-dir docs/figures/rubric_fold0    # PQ, Dice/IoU distributions, 1:n / n:1
+python -m scripts.rubric_metrics $V --output-dir docs/figures/rubric_fold0 \
+    --compare docs/figures/rubric_fold0_v7/per_record.json                   # PQ, Dice/IoU, 1:n / n:1, bootstrap CIs
 python -m scripts.morphology_figures $V --per-record docs/figures/rubric_fold0/per_record.json --output-dir docs/figures/morphology
 python -m scripts.morphology_figures --csv submission.csv --output-dir docs/figures/morphology_test
 python -m scripts.shape_statistics $V --csv submission.csv --output-dir docs/figures/shape
@@ -128,11 +127,11 @@ python research/label_visibility.py --folder runs/tta/<name>/val       # agreeme
 python research/magnetogram_pil.py --folder runs/tta/<name>/val        # distance to polarity inversion lines
 ```
 
-`rubric_metrics` reproduces the organizers' self-evaluation notebook and adds the `torchmetrics` DiceScore of the binary filament mask.
+`rubric_metrics` reproduces the organizers' self-evaluation notebook and adds the `torchmetrics` DiceScore of the binary filament mask. It reports 95 % bootstrap intervals over observations; resampling whole observations keeps all annotator records of an image together. With `--compare`, it also reports paired differences against another run's `per_record.json`.
 
 `magnetogram_pil` reads the line-of-sight magnetograms listed in `research/magnetogram_pairs.csv`: GONG QuickReduce `bqa` FITS in `data/gong_bqa/fits` and SDO/HMI `hmi.M_720s` FITS in `data/hmi_720s/fits`. The magnetograms are used for this analysis only, never for training or inference.
 
-The paper builds with `latexmk -pdf main.tex` in `paper/`. Its figures come from three sources:
+The report in `paper/` is written in the organizers' Overleaf template: ACM `acmart` sigconf, with `preamble.tex` unchanged and citations in `main.bib`. It builds with `latexmk -pdf main.tex`. Its figures come from three sources:
 - the architecture diagram is TikZ (`paper/fig_architecture.tex`) with thumbnails from `python paper/make_thumbnails.py --csv <submission.csv>`;
 - the visibility curves come from `research/label_visibility.py` (`docs/figures/visibility.pdf`, copied to `paper/figures/`);
 - the close-ups come from `scripts.morphology_details ... --paper-output paper/figures/morphology_details.png`.

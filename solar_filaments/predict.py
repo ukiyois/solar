@@ -1,7 +1,9 @@
 """Single-view inference CLI: instance masks (PNG), predictions.json and a submission-format CSV.
 
-The competition submission uses the 8-view dihedral TTA of scripts/dump_tta_candidates.py and
-scripts/sweep_recall_tta.py instead; this entry point is the plain one-forward-per-image path.
+The competition submission uses the 8-view dihedral TTA of scripts/dump_tta_candidates.py (GPU) and
+scripts/fuse_tta.py (CPU fusion) instead; this entry point is the plain one-forward-per-image path.
+
+usage: python -m solar_filaments.predict --checkpoint weights/final_a.pt --input <image or folder>
 """
 import argparse
 import csv
@@ -17,6 +19,14 @@ from .inference import instance_predictions, pad_image
 
 
 def main():
+    """Segment one image or a folder of .jpg/.jpeg/.png images and write the results to --output.
+
+    The architecture comes from the checkpoint; --config supplies the operational settings (context size,
+    DCN backend, tiling, checkpointing) and the inference thresholds. Per image: <stem>.instances.png
+    (uint16 instance ids, 0 = background) and an entry in predictions.json, which is rewritten after every
+    image. At the end: submission.csv (filament_id = <stem>_<instance id>, segmentation_rle = COCO RLE
+    counts), or diagnostic_predictions.csv for weights not marked task_trained (--allow-untrained).
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/local.yaml")
     parser.add_argument("--checkpoint")

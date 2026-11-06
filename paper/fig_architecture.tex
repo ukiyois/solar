@@ -1,7 +1,7 @@
 % Fig. 1: architecture of final-A (full text width). Thumbnails: paper/make_thumbnails.py.
 \begin{figure*}[t]
 \centering
-\begin{tikzpicture}[x=0.984cm, y=0.92cm,
+\begin{tikzpicture}[x=0.975cm, y=0.92cm,
   arch/.style={draw=black!65, rounded corners=1pt, align=center, inner sep=1.1pt,
                font=\fontsize{5.5}{6.3}\selectfont},
   ctx/.style={arch, fill=blue!9}, det/.style={arch, fill=orange!13}, dec/.style={arch, fill=green!10},
@@ -35,8 +35,8 @@
 \node[lab, below=0.4mm of c3] {darkness\\$I/B-1$};
 \draw[flow] (split) |- (c1.west);
 \node[det, text width=0.95cm, minimum height=1.15cm] (h1) at (5.88,1.62) {Haar 2$\times$2\\(4 phases)\\1$\times$1 conv\\32 ch, /2};
-\node[det, text width=0.95cm, minimum height=1.15cm] (g2) at (7.0,1.62) {gate $\oplus P_1$\\curve block\\32 ch, /2};
-\node[det, text width=0.95cm, minimum height=1.15cm] (g4) at (8.12,1.62) {Haar\\gate $\oplus P_1$\\curve block\\64 ch, /4};
+\node[det, text width=1.1cm, minimum height=1.15cm] (g2) at (7.05,1.62) {gate $\oplus P_1$\\curve block\\32 ch, /2};
+\node[det, text width=1.1cm, minimum height=1.15cm] (g4) at (8.3,1.62) {Haar\\gate $\oplus P_1$\\curve block\\64 ch, /4};
 \draw[flow] (c3.east) -- (h1.west);
 \draw[flow] (h1) -- (g2);
 \draw[flow] (g2) -- (g4);
@@ -63,7 +63,7 @@
    $\cdot$ cross-attention to the memory, masked by the query's own mask (global every 2nd layer)\\
    $\cdot$ attention to 64 native points of its mask (32 foreground, 32 edge)\\
    $\cdot$ FFN, mask feedback};
-\node[train, text width=1.9cm, minimum height=0.5cm] (pilot) at (13.36,0.95) {+32 mask pilots from noised GT masks (training only)};
+\node[train, text width=2.05cm, minimum height=0.5cm] (pilot) at (13.36,0.8) {+32 mask pilots from noised GT masks (training only)};
 \draw[flow] (fpn.east) -- node[lab, above] {$P_2,P_3$} (mem.west);
 \draw[line] (f4.east) -- ++(0.24,0) coordinate (bus);
 \draw[flow] (bus) |- ([yshift=-2.6mm]mem.west);
@@ -81,7 +81,7 @@
 \draw[flow] (layer.east |- head.west) -- (head.west);
 \draw[flow] (head) -- (rend);
 \draw[line] (m2.east) -- ++(0.12,0) coordinate (mbus);
-\draw[line] (mbus) -- (mbus |- 0,0.4) coordinate (low);
+\draw[line] (mbus) -- (mbus |- 0,0.3) coordinate (low);
 \draw[line] (ph.south) -- (ph.south |- low);
 \draw[flow] (ph.south |- low) -| (rend.south);
 \node[res, text width=1.52cm, minimum height=1.5cm] (tta) at (17.1,4.55)
@@ -95,6 +95,9 @@
   {\textbf{training}: Hungarian matching per annotator record, $-\log\widetilde{\mathrm{PQ}}$ on 16,384 native
    points, auxiliary losses $\times$0.02};
 \end{tikzpicture}
+\Description{Block diagram: an H-alpha image feeds a context branch (resize, FlashInternImage-L stages, FPN) and a native
+branch (intensity, local contrast and darkness channels, Haar split, gated curve blocks); both feed a query decoder whose
+per-query heads render native-resolution masks, fused over eight dihedral views into non-overlapping instances.}
 \caption{Architecture of final-A (223.6\,M parameters, 97.9\,\% in the backbone) at inference on a test
 observation. A pretrained backbone sees the whole disk at 1024\,px, and a native branch reads three physical
 channels at 2048\,px. Queries start at peaks of a skeleton-like seed map and render full-resolution masks from a

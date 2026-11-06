@@ -2,6 +2,8 @@
 
 Instance logits = mask embedding . stride-2 basis (bilinearly upsampled) + phase embedding . the four
 sub-pixel phase maps (pixel shuffle), so a one-pixel boundary is resolved at native 2048 px.
+fine_mask_logits renders whole native masks (inference, evaluation); fine_mask_points evaluates the same
+function at sampled native pixel centers (training losses) without building native-size tensors.
 """
 import torch
 from torch.nn import functional as F
@@ -15,6 +17,7 @@ def foreground_probability_mean(logits, weights=None, threshold=.5):
     the support keeps gradients through foreground probabilities without that
     image-area-dependent bias. Empty masks use their peak to retain a gradient.
     Optional inverse-proposal weights correct nonuniform native pixel sampling.
+    logits: N x P (or N x H x W) native mask logits; weights: one per point; returns N means.
     """
     probability = logits.float().sigmoid().flatten(1)
     support = (probability.detach() >= threshold).to(probability.dtype)
@@ -26,7 +29,13 @@ def foreground_probability_mean(logits, weights=None, threshold=.5):
 
 
 def sample_features(features, points, mode="bilinear"):
-    # points: P x 2, normalized full-image pixel centers.
+    """Sample B x C x h x w features at P points; returns B x C x P in float32.
+
+    points: P x 2, normalized full-image pixel centers: (x, y) in [0, 1], a native pixel (i, j) being
+    ((j + .5) / W, (i + .5) / H). Bilinear or nearest sampling as F.grid_sample with align_corners=False and
+    border padding, so a stride-2 map sampled at native pixel centers equals its bilinear 2x upsampling.
+    More than h * w / 8 points use grid_sample on the whole map; fewer gather only the needed neighbors.
+    """
     b, c, h, w = features.shape
     if len(points) > h * w // 8:
         return F.grid_sample(features.float(), points[None, None].expand(b, -1, -1, -1) * 2 - 1,
@@ -56,6 +65,8 @@ def phase_samples(features, points):
 
     Uses bilinear interpolation in the *native* pixel coordinate system, including
     the four different subpixel phases. Identical to sampling pixel_shuffle(...).
+    features: B x 4C x h x w, channel 4c + phase with phase = 2 * (row % 2) + (column % 2) of the native pixel;
+    points as in sample_features. Returns B x C x P in float32.
     """
     b, channels, h, w = features.shape
     c = channels // 4
@@ -76,6 +87,11 @@ def phase_samples(features, points):
 
 
 def fine_mask_points(output, index, queries, points):
+    """Native mask logits of the selected queries of image `index` at P normalized points: Q x P in float32.
+
+    The same function as fine_mask_logits at those pixel centers (tests/test_native_pq.py checks this), but
+    only the needed basis and phase values are sampled. queries indexes the query axis (slice, list, tensor).
+    """
     basis = sample_features(output["mask_features2"][index:index + 1], points)[0]
     result = output["mask_embeddings"][index, queries].float() @ basis
     if "phase_features2" in output:
@@ -85,6 +101,12 @@ def fine_mask_points(output, index, queries, points):
 
 
 def fine_mask_logits(output, index, queries):
+    """Native-resolution mask logits of the selected queries of image `index`: Q x H x W in float32.
+
+    The embedding . basis product is formed at stride 2 and bilinearly upsampled to output['image_size'];
+    the phase residual (four sub-pixel values per stride-2 cell) is pixel-shuffled to native resolution and
+    added. A 2048 x 2048 float32 mask takes 16 MiB, so callers render queries in small chunks.
+    """
     basis = output["mask_features2"][index]
     logits = torch.einsum("qc,chw->qhw", output["mask_embeddings"][index, queries].to(basis.dtype), basis).float()
     logits = F.interpolate(logits[None], size=output["image_size"], mode="bilinear", align_corners=False)[0]

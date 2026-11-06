@@ -14,8 +14,16 @@ against the same quantity computed on RLEs, and also reported pooled over all re
 Predictions are the fused TTA candidates of scripts/dump_tta_candidates.py, selected exactly as for
 a submission (member fusion + pixel ownership with the given votes / score / mask thresholds).
 
+Uncertainty: 95 % percentile intervals from a bootstrap over observations (all annotator records of
+an observation are resampled together, since they share one image). --compare takes the
+per_record.json of another run on the same observations and reports paired differences.
+
+Outputs in --output-dir: rubric_metrics.json (summary, setting and bootstrap), per_record.json (one row of
+additive statistics per record; read by --compare and scripts/morphology_figures) and rubric_distributions.png.
+
 usage: python -m scripts.rubric_metrics --folders runs/tta_s1a/val --folder-views d0,d1,d2,d3,f0,f1,f2,f3 \
-           --votes 1 --score .10 --mask .40 --output-dir docs/figures/rubric_fold0
+           --votes 1 --score .10 --mask .40 --output-dir docs/figures/rubric_fold0 \
+           [--compare docs/figures/rubric_fold0_v7/per_record.json]
 """
 import argparse
 import json
@@ -45,6 +53,13 @@ def torchmetrics_dice(union_gt, union_pred, shape=(2048, 2048)):
 
 
 def record_rows(job):
+    """Pool worker: one row per annotator record of a fold-0 image.
+
+    job = (stem, [(record id, GT RLEs)], folders, views, (votes, score, mask)). A row holds the record and image
+    ids, the instance counts, the (n_gt, n_pred) IoU matrix and the semantic Dice of the GT union against the
+    prediction union, computed on RLEs (two empty masks give 1) and with torchmetrics, plus the intersection
+    and the two union areas in pixels.
+    """
     stem, records, folders, views, setting = job
     _, kept = predict((stem, folders, views, setting))
     predictions = [p["rle"] for p in kept]
@@ -66,7 +81,70 @@ def record_rows(job):
     return rows
 
 
+def record_stats(row):
+    """Additive statistics of one record: PQ counts at IoU > .5 and the sums over overlapping pairs."""
+    iou, n_gt, n_pred = row["iou"], row["n_gt"], row["n_pred"]
+    if n_gt == 0 or n_pred == 0:
+        return {"tp_iou": 0., "tp": 0, "fp": n_pred, "fn": n_gt, "pairs": 0, "pair_iou_sum": 0., "pair_dice_sum": 0.}
+    hit, pairs = iou > .5, iou[iou > 0]
+    return {"tp_iou": float(iou[hit].sum()), "tp": int(hit.sum()), "fp": int((hit.sum(0) == 0).sum()),
+            "fn": int((hit.sum(1) == 0).sum()), "pairs": int(pairs.size), "pair_iou_sum": float(pairs.sum()),
+            "pair_dice_sum": float((2 * pairs / (1 + pairs)).sum())}
+
+
+# Additive per-record statistics: summing them over (resampled) observations yields every bootstrapped metric.
+COLUMNS = ("tp_iou", "tp", "fp", "fn", "pairs", "pair_iou_sum", "pair_dice_sum", "torchmetrics_dice", "intersection",
+           "areas", "records")
+
+
+def observation_table(records, images):
+    """One row of summed COLUMNS per observation (records of the same image added together)."""
+    index = {image: i for i, image in enumerate(images)}
+    table = np.zeros((len(images), len(COLUMNS)))
+    for r in records:
+        if r["image"] in index:
+            values = {**r, "areas": r["gt_area"] + r["pred_area"], "records": 1}
+            table[index[r["image"]]] += [values[c] for c in COLUMNS]
+    return table
+
+
+def metrics_from_sums(sums):
+    """PQ / SQ / RQ, mean pair IoU and Dice and the semantic Dice from (..., len(COLUMNS)) column sums."""
+    c = {name: sums[..., i] for i, name in enumerate(COLUMNS)}
+    denominator = c["tp"] + .5 * c["fp"] + .5 * c["fn"]
+    return {"pq": c["tp_iou"] / denominator, "sq": c["tp_iou"] / np.maximum(c["tp"], 1), "rq": c["tp"] / denominator,
+            "pair_iou_mean": c["pair_iou_sum"] / c["pairs"], "pair_dice_mean": c["pair_dice_sum"] / c["pairs"],
+            "semantic_dice_mean": c["torchmetrics_dice"] / c["records"],
+            "semantic_dice_global": 2 * c["intersection"] / c["areas"]}
+
+
+def bootstrap(records, other=None, samples=4000, seed=2026):
+    """95 % intervals over resampled observations; with `other`, paired differences (this run - other)."""
+    images = sorted({r["image"] for r in records} & ({r["image"] for r in other} if other else {r["image"] for r in records}))
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, len(images), (samples, len(images)))
+    mine = metrics_from_sums(observation_table(records, images)[draws].sum(1))
+    interval = lambda values: [round(float(q), 4) for q in np.percentile(values, [2.5, 97.5])]
+    result = {"observations": len(images), "samples": samples, "ci95": {k: interval(v) for k, v in mine.items()}}
+    if other:
+        theirs = metrics_from_sums(observation_table(other, images)[draws].sum(1))
+        full = {k: float(v) for k, v in metrics_from_sums(observation_table(records, images).sum(0)).items()}
+        base = {k: float(v) for k, v in metrics_from_sums(observation_table(other, images).sum(0)).items()}
+        result["paired_difference"] = {k: {"difference": round(full[k] - base[k], 4), "ci95": interval(mine[k] - theirs[k]),
+                                           "p_not_better": round(float(np.mean(mine[k] - theirs[k] <= 0)), 4)}
+                                       for k in ("pq", "pair_dice_mean", "semantic_dice_mean")}
+    return result
+
+
 def summarize(rows):
+    """Pool the record rows into the rubric summary.
+
+    PQ / SQ / RQ from TP (IoU > .5), FP and FN pooled over records; mean and quantiles of IoU and of Dice
+    (2 IoU / (1 + IoU)) over every overlapping (IoU > 0) GT/prediction pair; semantic Dice per record (mean,
+    median) and pooled over records (global), with the largest torchmetrics-vs-RLE difference; degree counts
+    (predictions overlapping each GT instance, GT instances overlapping each prediction). Returns (summary,
+    pair IoUs, pair Dice, per-record torchmetrics Dice, GT degree Counter, prediction degree Counter).
+    """
     tp_iou, fp, fn = [], 0, 0
     pair_iou, gt_degree, pred_degree = [], Counter(), Counter()
     for row in rows:
@@ -110,6 +188,8 @@ def summarize(rows):
 
 
 def plot(pair_iou, pair_dice, semantic, gt_degree, pred_degree, out, title):
+    """Save <out>/rubric_distributions.png: pair IoU, pair Dice and per-record semantic Dice histograms, and the
+    many-to-one (left, n GT : 1 prediction) / one-to-many (right, 1 GT : n predictions) bar chart."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -159,6 +239,7 @@ def plot(pair_iou, pair_dice, semantic, gt_degree, pred_degree, out, title):
 
 
 def main():
+    """Score fold 0 at the given setting and write the JSON files and the figure."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)
@@ -168,6 +249,7 @@ def main():
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--title", default="Fold-0 validation, final judging metrics")
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--compare", help="per_record.json of another run: paired bootstrap differences")
     args = parser.parse_args()
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -181,10 +263,11 @@ def main():
     summary, pair_iou, pair_dice, semantic, gt_degree, pred_degree = summarize(rows)
     summary["setting"] = {"folders": args.folders, "views": args.folder_views, "votes": args.votes,
                           "score": args.score, "mask": args.mask}
-    (out / "rubric_metrics.json").write_text(json.dumps(summary, indent=1))
-    (out / "per_record.json").write_text(json.dumps(
-        [{k: v for k, v in r.items() if k != "iou"} | {"tp": int((r["iou"] > .5).any(1).sum()) if r["n_pred"] else 0}
-         for r in rows], indent=1))
+    records = [{k: v for k, v in r.items() if k != "iou"} | record_stats(r) for r in rows]
+    other = json.loads(Path(args.compare).read_text()) if args.compare else None
+    summary["bootstrap"] = bootstrap(records, other)
+    (out / "rubric_metrics.json").write_text(json.dumps(summary, indent=1), encoding="utf-8", newline="\n")
+    (out / "per_record.json").write_text(json.dumps(records, indent=1), encoding="utf-8", newline="\n")
     plot(pair_iou, pair_dice, semantic, gt_degree, pred_degree, out, args.title)
     print(json.dumps(summary, indent=1))
 

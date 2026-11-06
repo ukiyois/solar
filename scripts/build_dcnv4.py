@@ -1,4 +1,13 @@
-"""Build the pinned official CUDA operator in this interpreter's environment."""
+"""Build the pinned official CUDA operator in this interpreter's environment.
+
+The operator is DCNv4 (OpenGVLab/DCNv4, commit COMMIT). The source is third_party/DCNv4_op when bundled (its
+SOURCE.json must name the pinned commit), otherwise a clone in .cache/upstream/DCNv4 checked out at COMMIT. It
+is copied to .cache/dcnv4-build-src, patched only in includes and package imports (kernels unchanged, see the
+comments in main) and installed with pip --no-build-isolation. The build log is runs/setup/dcnv4_build.log;
+the exit code is pip's. --arch sets TORCH_CUDA_ARCH_LIST (e.g. 8.6 for an RTX 3090).
+
+usage (repository root): python scripts/build_dcnv4.py [--arch 8.6]
+"""
 import argparse
 import json
 import os
@@ -12,6 +21,7 @@ COMMIT = "4b848f7dd7da74ff03f7d278f902c6fd05b391b5"
 
 
 def main():
+    """Prepare the pinned source, then build and install the operator into the running interpreter."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--arch", default=None)
     args = parser.parse_args()
@@ -46,6 +56,8 @@ def main():
     for name, text in initializers.items():
         (build_source / "DCNv4" / name).write_text(text)
     env = os.environ.copy()
+    # Windows without a loaded MSVC environment: import the variables set by vcvars64.bat. cl.exe lives in
+    # VC/Tools/MSVC/<version>/bin/Hostx64/x64, so parents[6] is VC; the second candidate is a machine-specific path.
     if os.name == "nt" and not env.get("INCLUDE"):
         compiler = shutil.which("cl")
         candidates = [Path(compiler).parents[6] / "Auxiliary/Build/vcvars64.bat"] if compiler else []
@@ -61,6 +73,8 @@ def main():
     env["MAX_JOBS"] = env.get("MAX_JOBS", "2")
     if args.arch:
         env["TORCH_CUDA_ARCH_LIST"] = args.arch
+    # Windows: accept an MSVC newer than nvcc officially supports and silence warning 177 (declared but never
+    # referenced); DISTUTILS_USE_SDK makes setuptools use the environment above; VSLANG=1033 = English messages.
     if os.name == "nt":
         env["NVCC_PREPEND_FLAGS"] = "-allow-unsupported-compiler -diag-suppress=177"
         env["DISTUTILS_USE_SDK"] = "1"

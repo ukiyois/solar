@@ -1,4 +1,9 @@
-"""Image-conditioned query locations from native-detail candidate features."""
+"""Image-conditioned query locations from native-detail candidate features.
+
+The candidates are peaks of the decoder's seed score, a 1x1 head on the stride-4 detail features trained
+against GT skeleton occupancy. Each query starts at a different strong, spatially separated candidate, so the
+initial queries depend on the image instead of being fixed learned embeddings only.
+"""
 import torch
 from torch.nn import functional as F
 
@@ -11,6 +16,10 @@ def query_seed_indices(logits, queries, candidate_count=1024, diversity=.5):
     gradients. Nearby peaks along the same long filament otherwise consume a
     disproportionate number of initial queries. The spatial preference is soft:
     low-confidence distant background does not automatically outrank a filament.
+    logits: B x 1 x h x w seed logits; returns B x queries indices into the flattened h x w grid. Candidates are
+    the candidate_count best 7x7 local maxima. The first queries // 4 are the strongest; every further one
+    maximizes sigmoid(logit)^2 * d^(2 * diversity), d being the distance (normalized coordinates) to the
+    nearest location already chosen. diversity = 0 returns the strongest peaks.
     """
     b, _, h, w = logits.shape
     value = logits[:, 0].float()

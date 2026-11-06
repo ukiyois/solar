@@ -1,4 +1,12 @@
-"""Compact status of training runs: process, validation history, recent losses."""
+"""Compact status of training runs: process, validation history, recent losses.
+
+Per run directory: whether the process in <run>/pid is alive (elapsed time from `ps`, so Linux/macOS), every
+epoch of validation_history.jsonl (PQ at the fixed operating point and at the grid optimum), the losses of
+the last two epochs in history.jsonl, and from the last 400 lines of console.log the latest errors and batch
+progress. Run directories are resolved from the repository root.
+
+usage: python scripts/run_status.py runs/<name> [runs/<name> ...]
+"""
 import json
 import os
 import subprocess
@@ -7,6 +15,7 @@ from pathlib import Path
 
 
 def main():
+    """Print a status block for every run directory given on the command line."""
     for run in map(Path, sys.argv[1:]):
         pid = (run / "pid").read_text().strip() if (run / "pid").exists() else ""
         elapsed = subprocess.run(["ps", "-p", pid, "-o", "etime="], capture_output=True, text=True).stdout.strip() if pid else ""

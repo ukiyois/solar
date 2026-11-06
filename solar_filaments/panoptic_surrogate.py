@@ -4,6 +4,9 @@ Discrete decisions have their inference values in the forward pass. Backward
 uses smooth local approximations; this is a biased gradient estimator, not a
 claim that the official discrete PQ metric is differentiable. Native-pixel
 importance sampling still makes areas and IoUs finite-sample estimates.
+
+Selected by losses.FilamentCriterion(pq_surrogate='straight_through'). The final recipe uses the soft
+surrogate in losses.py instead: this variant lowered fold-0 PQ (docs/TECHNICAL_REPORT.md, section 10).
 """
 import torch
 import math
@@ -11,6 +14,7 @@ from scipy.optimize import linear_sum_assignment
 
 
 def straight_through(soft, hard):
+    """Straight-through estimator (Bengio et al., 2013): the value of `hard`, the gradient of `soft`."""
     return soft + (hard.to(soft.dtype) - soft).detach()
 
 
@@ -19,6 +23,19 @@ def sampled_panoptic_terms(logits, confidence, truth, weights, image_area,
                            score_temperature=.05, iou_temperature=.1,
                            mask_temperature=.5, owner_temperature=.15,
                            min_area=32, min_retained_fraction=.5, mask_threshold=.5):
+    """PQ numerator and denominator of one annotator record: hard decisions forward, soft gradients backward.
+
+    logits: Q x P native mask logits at P importance-sampled pixels; confidence: Q query scores
+    (P(filament) * sigmoid(quality) * mean foreground probability); truth: N x P GT labels; weights: P
+    inverse-proposal weights (losses.native_area_points); image_area: native pixel count, which turns
+    weighted sample sums into pixel areas. The forward pass applies the rule of
+    inference.instance_predictions: admission by score and min_area, exclusive pixel ownership by the
+    highest probability * confidence, and the min_area / min_retained_fraction filter. Hungarian matching
+    after ownership maximizes the number of IoU > iou_threshold matches first. Backward uses the soft
+    detection, ownership, mask and TP sigmoids of the soft surrogate with the given temperatures.
+    Returns (numerator = sum of TP IoUs, denominator = (#kept queries + #GT) / 2, diagnostics); the caller
+    sums both over the batch before dividing.
+    """
     probability = logits.float().sigmoid()
     weight = weights.float()[None]
     detection_soft = ((confidence - score_threshold) / score_temperature).sigmoid()
@@ -53,6 +70,7 @@ def sampled_panoptic_terms(logits, confidence, truth, weights, image_area,
         with torch.no_grad():
             # Assign after ownership, maximizing number of >.5 matches first,
             # then their IoU. Auxiliary mask assignment remains independent.
+            # A match is worth N + 1, more than any possible IoU sum, which makes the order lexicographic.
             reward = ((iou.detach() > iou_threshold).float() * (y.shape[0] + 1) +
                       iou.detach()) * kept[:, None]
             row, column = linear_sum_assignment(-reward.cpu().numpy())

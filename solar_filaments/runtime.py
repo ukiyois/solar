@@ -1,10 +1,14 @@
-"""Training throughput utilities; matching and file I/O remain outside compile."""
+"""Training runtime: CUDA math settings, GPU prefetch, photometric jitter, weight EMA and torch.compile.
+
+These are throughput utilities; matching and file I/O remain outside compile.
+"""
 from contextlib import contextmanager
 import os
 import torch
 
 
 def configure_cuda():
+    """Allow TF32 in float32 matmuls and cuDNN convolutions; cuDNN benchmarks up to 4 algorithms per shape."""
     torch.set_float32_matmul_precision("high")
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -14,6 +18,10 @@ def configure_cuda():
 
 
 def move_batch(batch, device):
+    """Copy one collated (images, targets) batch to `device` with non-blocking copies.
+
+    uint8 images (a quarter of the float32 bytes) are converted to float in [0, 1] on the device.
+    """
     images, targets = batch
     images = images.to(device, non_blocking=True)
     if images.dtype == torch.uint8:
@@ -24,6 +32,13 @@ def move_batch(batch, device):
 
 
 class DevicePrefetcher:
+    """Iterate a DataLoader while the next batch is copied to the GPU on a side CUDA stream.
+
+    The copy overlaps the current training step. record_stream() tells the caching allocator that the
+    compute stream uses the prefetched tensors, so their memory is not reused too early. On the CPU, or with
+    enabled=False, each batch is moved on the current stream when it is needed (move_batch).
+    """
+
     def __init__(self, loader, device, enabled=True):
         self.loader, self.device = loader, device
         self.enabled = enabled and device.type == "cuda"
@@ -36,6 +51,7 @@ class DevicePrefetcher:
         stream = torch.cuda.Stream(device=self.device)
         iterator = iter(self.loader)
         def preload():
+            """Start copying the next batch on the side stream; None when the loader is exhausted."""
             try:
                 batch = next(iterator)
             except StopIteration:
@@ -57,6 +73,13 @@ class DevicePrefetcher:
 
 
 def photometric(images, settings):
+    """Random per-image contrast, brightness, gamma and noise for B x 1 x H x W images in [0, 1].
+
+    Contrast is scaled about the image mean by 1 +- 0.15, brightness by 1 +- 0.1, gamma is 1 +- 0.1, and
+    Gaussian noise has a standard deviation drawn from [0, 0.005]; the result is clamped to [0, 1]. This is
+    mild jitter of the intensity scale, which changes with exposure and sky transparency between frames.
+    settings['photometric'] = False disables it.
+    """
     if not settings.get("photometric", True):
         return images
     b = images.shape[0]
@@ -71,12 +94,20 @@ def photometric(images, settings):
 
 
 class ModelEMA:
+    """Exponential moving average of the model weights; train.py validates and saves the averaged weights.
+
+    After n updates the decay is min(decay, (1 + n) / (warmup + n)): the average follows the weights closely
+    at first and averages over a longer horizon as training proceeds. Floating-point state-dict entries are
+    averaged; other buffers are copied.
+    """
+
     def __init__(self, model, decay=.999, warmup=100):
         self.shadow = {k: v.detach().clone() for k, v in model.state_dict().items()}
         self.decay, self.warmup, self.updates = decay, warmup, 0
 
     @torch.no_grad()
     def update(self, model):
+        """Blend the current weights into the average; called after every successful optimizer step."""
         self.updates += 1
         decay = min(self.decay, (1 + self.updates) / (self.warmup + self.updates))
         old, new = [], []
@@ -90,6 +121,7 @@ class ModelEMA:
 
     @contextmanager
     def apply(self, model):
+        """Context manager: load the averaged weights into `model` and restore the training weights on exit."""
         backup = {k: v.detach().clone() for k, v in model.state_dict().items()}
         model.load_state_dict(self.shadow, strict=True)
         try:
@@ -98,15 +130,24 @@ class ModelEMA:
             model.load_state_dict(backup, strict=True)
 
     def state_dict(self):
+        """Averaged weights and update count, stored in last.pt for --resume."""
         return {"shadow": self.shadow, "updates": self.updates}
 
     def load_state_dict(self, state):
+        """Restore an average saved by state_dict() into the existing tensors."""
         for key, value in state["shadow"].items():
             self.shadow[key].copy_(value)
         self.updates = state["updates"]
 
 
 def compile_training(model, settings):
+    """Optionally torch.compile the model's forward for training; returns a report dict.
+
+    settings['compile']: off / False / None keeps eager mode, 'auto' compiles except on Windows, any other
+    value compiles with compile_backend, compile_mode and compile_fullgraph (static shapes). When enabled,
+    the report holds the compiled callable under 'forward'; train.main installs it on the model and swaps
+    the eager forward back in for validation.
+    """
     requested = settings.get("compile", "off")
     if requested in (False, "off", None):
         return {"enabled": False}

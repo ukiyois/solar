@@ -7,6 +7,13 @@ rerunning the model. View "d0" additionally keeps every low-score query as an RL
 An optional suffix s<size> sets the backbone view size of that view (multi-scale TTA; not used by the
 final submission).
 
+Output: one <image stem>.npz per image. `meta` is a JSON list with one entry per stored query (key, variant =
+view, query index, score, and either box = (y0, y1, x0, x1) or rle = COCO counts string); every box entry has
+an FP16 crop under its key. Crops are kept for queries with score >= --keep-score and cover the bounding box
+of the pixels with probability >= --crop-probability. manifest.json records the checkpoint, split, views,
+thresholds and file order. Existing .npz files are skipped, so an interrupted run resumes; --shard / --shards
+split the images across processes.
+
 usage (final submission):
   python -m scripts.dump_tta_candidates --checkpoint weights/final_a.pt --split test --output runs/tta/final_a/test
   python -m scripts.dump_tta_candidates --checkpoint <fold-0 model> --split val --output runs/tta/<name>/val
@@ -31,11 +38,13 @@ DIHEDRAL = ["d0", "d1", "d2", "d3", "f0", "f1", "f2", "f3"]
 
 
 def dihedral(image, k, flip):
+    """View d<k> or f<k>: rotate the last two axes by k * 90 degrees, then flip horizontally if `flip`."""
     image = torch.rot90(image, k, (-2, -1))
     return image.flip(-1) if flip else image
 
 
 def undo_dihedral(maps, k, flip):
+    """Inverse of dihedral(): map per-query maps of a view back to the original image orientation."""
     if flip:
         maps = maps.flip(-1)
     return torch.rot90(maps, -k, (-2, -1))
@@ -56,7 +65,11 @@ def load_model(config_path, checkpoint, device):
 def candidates(model, image, k, flip, keep_score, crop_probability, binary_rest=None, chunk=8, context_size=None):
     """Queries scoring >= keep_score keep FP16 probability crops (support >= crop_probability); with
     binary_rest, every other query keeps only its RLE at that probability threshold (miss attribution).
-    Score = P(filament) * sigmoid(quality), as in solar_filaments.inference."""
+    Score = P(filament) * sigmoid(quality), as in solar_filaments.inference.
+
+    Native-resolution masks are rendered `chunk` queries at a time to bound GPU memory. Returns dicts
+    {query, score, box, prob (numpy FP16 crop)} or {query, score, rle}; a query without any pixel at
+    crop_probability is dropped."""
     output = model(dihedral(image, k, flip), tiled_detail=True, context_size=context_size)
     scores = (output["pred_logits"][0].float().softmax(-1)[:, 0] *
               output["pred_quality"][0].float().sigmoid())
@@ -83,6 +96,7 @@ def candidates(model, image, k, flip, keep_score, crop_probability, binary_rest=
 
 
 def main():
+    """Dump the candidates of every view for each image of the split (or of --images), one .npz per image."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/local.yaml", help="local operational settings (backend, tiling)")
     parser.add_argument("--train-config", default="configs/v9_ffinal_a.yaml", help="data root and fold definition")
@@ -152,6 +166,7 @@ def main():
                     if "prob" in item:
                         arrays[key] = item.pop("prob")
                     meta.append({"key": key, "variant": variant, **item})
+        # write then rename, so an interrupted run never leaves a truncated .npz that a resume would skip
         temporary = target.with_suffix(".tmp.npz")
         np.savez_compressed(temporary, meta=np.array(json.dumps(meta)), **arrays)
         temporary.replace(target)

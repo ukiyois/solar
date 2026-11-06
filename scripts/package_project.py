@@ -1,8 +1,11 @@
 """Build the portable code archive for submission (competition images, caches and run outputs excluded).
 
-usage: python scripts/package_project.py [--include-weights] [--output deliverables/solar_filaments_final.zip]
+usage: python scripts/package_project.py [--include-weights] [--output <zip path relative to the repository>]
 --include-weights adds weights/final_a.pt (the submitted model, ~0.9 GB); the ImageNet backbone is
 not needed for inference (it is part of the checkpoint) and is fetched by scripts/download_weights.py.
+Default output: deliverables/solar_filaments_final_code.zip (solar_filaments_final_with_weights.zip with
+--include-weights), plus a .manifest.json with its size and SHA-256. The archive holds DOCUMENTS and the
+source FOLDERS only: data/, runs/ and weights/ are left out (except weights/final_a.pt with --include-weights).
 """
 import argparse
 import hashlib
@@ -25,6 +28,7 @@ def released(path, root):
 
 
 def sha256(path):
+    """Hex SHA-256 of a file, read in 8 MiB blocks."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(8 << 20), b""):
@@ -33,6 +37,7 @@ def sha256(path):
 
 
 def main():
+    """Write the zip archive and its manifest, and print the manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--output")
     parser.add_argument("--include-weights", action="store_true")

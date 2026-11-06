@@ -101,7 +101,7 @@ L = L_PQ + 0.02 · mean over images of [ 2 L_class + L_mask + L_fine + 0.5 L_qua
 
 Other implemented terms (clDice topology, boundary distance, pixel competition, centerline/boundary heads) have weight 0 in the final recipe. Fold-0 experiments showed that the PQ-aligned objective, not auxiliary shape losses, moved the score (§10).
 
-**Optimization.** AdamW (β = 0.9/0.999, weight decay 0.05, none on norms and biases), gradient clipping 1.0, FP16 autocast with a GradScaler, EMA of the weights (decay 0.999), one-epoch warmup and cosine decay to 2 %, batch 3 per GPU, `torch.compile` (inductor) and activation checkpointing.
+**Optimization.** AdamW (β = 0.9/0.999, weight decay 0.05, none on norms and biases), gradient clipping 1.0, FP16 autocast with a GradScaler, EMA of the weights with a warm-up (decay min(0.999, (1 + n)/(100 + n)) after n updates, about 0.99 at the end of final-A's 9,224 updates), one-epoch warmup and cosine decay to 2 %, batch 3 per GPU, `torch.compile` (inductor) and activation checkpointing.
 
 ## 6 Training stages
 
@@ -165,10 +165,10 @@ Fold-0 PQ runs about 0.05 above the public score. We checked two explanations. T
 
 | Fold 0, 8-view TTA, votes 1/8, score 0.10, mask 0.40 | **final recipe (E9)** | v7 reference |
 |---|---|---|
-| PQ (SQ / RQ) | **0.446** (0.678 / 0.658) | 0.436 (0.676 / 0.645) |
+| PQ (SQ / RQ) [95 % CI] | **0.446** (0.678 / 0.658) [0.420, 0.471] | 0.436 (0.676 / 0.645) [0.407, 0.463] |
 | TP / FP / FN | 810 / 311 / 531 | 790 / 320 / 551 |
-| Mean Dice, overlapping pairs (median) | **0.728** (0.785) | 0.711 (0.773) |
-| Mean IoU, overlapping pairs (median) | 0.597 (0.646) | 0.580 (0.630) |
+| Mean Dice, overlapping pairs (median) [95 % CI] | **0.728** (0.785) [0.712, 0.744] | 0.711 (0.773) [0.690, 0.730] |
+| Mean IoU, overlapping pairs (median) [95 % CI] | 0.597 (0.646) [0.580, 0.614] | 0.580 (0.630) [0.559, 0.600] |
 | torchmetrics DiceScore per record: mean / median / pooled | 0.656 / 0.692 / 0.684 | 0.660 / 0.697 / 0.691 |
 | One-to-many: GT overlapped by 0 / 1 / 2 / 3 predictions | 316 / 1,001 / 24 / 0 | 306 / 1,005 / 27 / 3 |
 | Many-to-one: prediction overlapping 0 / 1 / 2 / 3 GT | 131 / 935 / 51 / 4 | 122 / 917 / 62 / 9 |
@@ -179,7 +179,7 @@ Fold-0 PQ runs about 0.05 above the public score. We checked two explanations. T
 How to read this table:
 - **Dice and IoU.** Pair Dice is unimodal: median 0.785, interquartile range 0.68–0.84, 10th percentile 0.50. The low tail is overlaps that are not matches: partial extents, and one prediction covering two drawn fragments.
 - **One-to-one structure.** 97.7 % of the GT filaments that any prediction overlaps are overlapped by exactly one. 94.4 % of predictions that overlap GT overlap exactly one GT instance. Splits (24) and merges (55) are rare. The remaining errors are mostly whole filaments that are missed (316 with no overlap at all) or predicted where the annotator drew nothing (131).
-- **Final recipe vs v7.** Self-training improved PQ (+0.010) and pair Dice (+0.018), with fewer merges (55 vs 71) and splits (24 vs 30). The pixel-level semantic Dice is unchanged within 0.007: the gain is in instance correctness, not in the total filament area.
+- **Final recipe vs v7.** Self-training improved PQ by +0.010 [0.000, 0.020] and pair Dice by +0.018 [0.006, 0.031], with fewer merges (55 vs 71) and splits (24 vs 30). The brackets are paired 95 % bootstrap intervals over observations (`rubric_metrics --compare`). The pixel-level semantic Dice did not change measurably (−0.004 [−0.016, 0.009]): the gain is in instance correctness, not in the total filament area. For scale, on 90 observations (one leaderboard half) the PQ of a single model varies with an SD of about 0.014.
 - **Semantic Dice per record.** It is lowest for sparse records (0.61 with 1–3 filaments, where one miss weighs heavily) and highest with 8–12 filaments (0.69). Four records score 0. In three of them (two observations) the model predicted nothing where the annotators drew 1–3 filaments; in the fourth, three predictions miss the single drawn filament. The same prediction's semantic Dice differs by 0.13 on average between the annotator records of one observation, so the labels themselves cap pixel metrics.
 
 ### 9.3 Where PQ is lost
@@ -188,11 +188,11 @@ How to read this table:
 
 | Error | Count | Breakdown |
 |---|---|---|
-| FN, no candidate overlaps it (IoU ≤ 0.1) | 296 | by area: 188 small (< 800 px), 90 medium, 18 large. On multi-annotator observations, 120 were drawn by a minority of annotators and 44 by a majority |
-| FN, near miss (best IoU 0.1–0.5) | 198 | prediction too large 96, too small 67, shifted 35. A prediction spanning 2+ GT 66, a GT split over 2+ predictions 15 |
-| FN, correct candidate with low score | 37 | |
-| FP, near miss of a GT instance | 176 | the extent/granularity counterpart of the FN near misses |
-| FP, no GT overlap in that record | 135 | the annotator did not draw it, or a false detection |
+| FN, no candidate: no kept prediction with IoU > 0.1 and no fused candidate with IoU > 0.5 | 296 | by area: 188 small (< 800 px), 90 medium, 18 large. On multi-annotator observations, 120 were drawn by a minority of annotators and 44 by a majority |
+| FN, near miss: a kept prediction overlaps it with IoU 0.1–0.5 | 198 | prediction too large 96, too small 67, shifted 35. A prediction spanning 2+ GT 66, a GT split over 2+ predictions 15 |
+| FN, low score: a fused candidate below the selection rule has IoU > 0.5 | 37 | |
+| FP, near miss: overlaps a GT instance of that record with IoU 0.1–0.5 | 176 | the extent/granularity counterpart of the FN near misses |
+| FP, unlabelled: no GT instance of that record with IoU > 0.1 | 135 | the annotator did not draw it, or a false detection |
 
 The decoder usually *finds* the missed filaments. In single-view miss attribution, 83 % of the 631 GT filaments missed by view d0 overlap some query: 22 % at IoU > 0.5 but with a low score, 37 % at IoU 0.3–0.5 and 25 % at 0.1–0.3. Only 17 % are never proposed, and half of those are below 500 px. The dominant errors are therefore extent and granularity decisions on which annotators also disagree (§1), plus small, faint, often minority-drawn filaments. For context, matched IoU (SQ 0.678) already exceeds the annotator-vs-annotator SQ (0.634).
 
@@ -265,7 +265,7 @@ On the 296 multi-record training observations (4,993 filaments), its *agreement*
 | Model vs. each record (119 pairs) | 0.483 / 0.468 / **0.430** / 0.347 | 60.0 / 15.9 / 24.1 % |
 | Record vs. record (194 ordered pairs) | 0.408 / 0.378 / 0.327 / 0.222 | 51.8 / 27.2 / 21.0 % |
 
-The model agrees with the annotators better than they agree with each other at every IoU threshold, and the gap widens as the threshold gets stricter. It draws extents more consistently than a second annotator: near misses are 15.9 % against 27.2 %. It misses slightly more faint filaments entirely.
+The model agrees with the annotators better than they agree with each other at every IoU threshold, and the gap widens as the threshold gets stricter. At IoU > 0.5 the 95 % bootstrap intervals are model 0.430 [0.391, 0.465] and annotators 0.327 [0.283, 0.371], with a paired difference of +0.103 [0.076, 0.129]; the model was better in all 4,000 resamples. It draws extents more consistently than a second annotator: near misses are 15.9 % against 27.2 %. It misses slightly more faint filaments entirely.
 
 **A magnetic check.** Filaments lie above polarity inversion lines (PILs) of the photospheric field, and H-alpha cannot show this.
 - *Pairs.* `research/magnetogram_pairs.csv` pairs each of the 707 training observations with a line-of-sight magnetogram:
@@ -362,7 +362,7 @@ Hardware: rented RTX 3090 (24 GB) ×2 and RTX 5090 (32 GB). PyTorch 2.10 + CUDA 
 | `notebooks/` | `end_to_end.ipynb`: installation, checks, unit tests, test inference and submission, judging metrics, analyses and the training chain |
 | `research/` | Inter-annotator agreement, label visibility, the magnetogram/PIL check (with its pairing list), dataset geometry statistics and a PQ upper bound; `research/README.md` lists each script, its output and its key result |
 | `docs/` | This report and all figures, plus analysis outputs (`docs/analysis/`) |
-| `paper/` | The 4-page report (LaTeX, IEEEtran conference class) with its figures |
+| `paper/` | The 4-page report in the organizers' Overleaf template (ACM `acmart`, sigconf) with its figures |
 
 **Release cleanup.** Experimental branches that were not adopted were removed before release: annotator conditioning, multi-hypothesis training, consistency training, copy-paste, SAM, CondInst and curve decoders, multi-scale memory and the robust flat field. Removal was verified to be exact. A deterministic CPU harness compared the package before and after the cleanup: forward outputs (tiled and untiled), selected instances, every loss term and every parameter gradient were bitwise identical, as were 12 augmented dataset samples. final-A loads strictly into the released code (939 tensors). Old checkpoints that store retired options load only if those options were off (`config.checkpoint_config`).
 

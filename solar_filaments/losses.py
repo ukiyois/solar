@@ -1,4 +1,15 @@
-"""Instance-balanced shape supervision and PQ-aware set prediction.
+"""Training objective: set matching, a differentiable Panoptic Quality loss and auxiliary terms.
+
+Every annotator record (one annotator's drawing of one observation) is one sample. Per record, the queries
+are matched one-to-one to the GT instances (match_instances). The primary loss is -log of a soft Panoptic
+Quality computed from the native-resolution (2048 px) mask logits at importance-sampled pixels
+(native_area_points), with a soft pixel ownership that mirrors the inference-time pixel competition
+(inference.instance_predictions). Its numerator and denominator are summed over the batch and all GPUs
+before dividing, as the competition pools TP/FP/FN over records. The auxiliary terms (classification,
+point-sampled mask BCE + Dice, quality, intermediate decoder layers and mask pilots, seed map) are scaled
+by `auxiliary_scale`. The remaining terms (area IoU, clDice topology, boundary distance, skeleton coverage
+and recall, pixel competition, instance discrimination, dense heads) are implemented but have weight 0 in
+the final recipe (configs/pq_recovery_v7.yaml onward).
 
 The topology prior is applied to each annotator's matched instance separately.
 No loss joins disconnected annotations or assumes that all foreground connects.
@@ -12,10 +23,16 @@ from .geometry import derive_geometry, target_at_points, unpack_masks
 from .masks import sample_features, phase_samples, fine_mask_points, fine_mask_logits, foreground_probability_mean
 from .panoptic_surrogate import sampled_panoptic_terms
 
+# Alias of masks.sample_features: B x C x h x w maps -> B x C x P values at P normalized (x, y) points.
 sample_points = sample_features
 
 
 def dice_loss(logits, target, weights=None):
+    """Soft Dice loss along the last axis, averaged over all other axes.
+
+    logits, target (0/1) and the optional weights share the shape ... x P (P sample points). The +1 in
+    numerator and denominator keeps the loss finite and makes an empty prediction on an empty target cost 0.
+    """
     p = logits.float().sigmoid()
     weights = torch.ones_like(target) if weights is None else weights
     return (1 - (2 * (p * target * weights).sum(-1) + 1) /
@@ -23,6 +40,14 @@ def dice_loss(logits, target, weights=None):
 
 
 def soft_skeleton(probability, iterations=8):
+    """Differentiable soft skeleton of clDice (Shit et al., CVPR 2021).
+
+    probability: B x 1 x H x W in [0, 1]. Soft erosion is a min-pool over the 3 x 3 cross (a pixel and its
+    4 neighbors) and opening is an erosion followed by a 3 x 3 max-pool. The thin ridges that opening removes
+    are collected, as a soft union, over `iterations` successive erosions. As clDice notes, `iterations` must
+    be at least the largest structure radius in pixels, otherwise thick parts get no skeleton. Returns
+    B x 1 x H x W in [0, 1].
+    """
     def erode(x):
         return torch.minimum(-F.max_pool2d(-x, (3, 1), 1, (1, 0)),
                              -F.max_pool2d(-x, (1, 3), 1, (0, 1)))
@@ -37,6 +62,13 @@ def soft_skeleton(probability, iterations=8):
 
 
 def cldice_loss(logits, truth, skeleton, iterations=8):
+    """clDice loss (Shit et al., CVPR 2021) of matched instances, each in its own ROI.
+
+    logits: N x R x R ROI mask logits (fine_rois); truth, skeleton: N x R x R GT mask and precomputed GT
+    skeleton of the matched instance. Topology precision is the share of the soft predicted skeleton inside
+    the GT mask; topology sensitivity is the share of the GT skeleton covered by the predicted mask. The loss
+    is one minus their harmonic mean (+1 smoothing), averaged over instances.
+    """
     p = logits.float().sigmoid()[:, None]
     predicted_skeleton = soft_skeleton(p, iterations)[:, 0]
     precision = ((predicted_skeleton * truth).sum((-2, -1)) + 1) / (predicted_skeleton.sum((-2, -1)) + 1)
@@ -45,7 +77,12 @@ def cldice_loss(logits, truth, skeleton, iterations=8):
 
 
 def balanced_binary(logits, truth):
-    """Bounded positive weighting; background must still constrain false alarms."""
+    """Class-balanced BCE plus Dice for a dense binary map (seed map and semantic/centerline/boundary heads).
+
+    logits, truth: C x H x W. Positive pixels are up-weighted by sqrt(#negative / #positive), bounded to
+    [1, 20]. Skeleton and edge pixels cover a small fraction of the disk, and the bound keeps the background
+    constraining false alarms.
+    """
     positive = truth.sum().clamp_min(1)
     pos_weight = ((truth.numel() - positive) / positive).sqrt().clamp(1, 20)
     bce = ((1 - truth) * F.softplus(logits) + pos_weight * truth * F.softplus(-logits)).mean()
@@ -53,7 +90,14 @@ def balanced_binary(logits, truth):
 
 
 def training_points(target, count, coarse):
-    """1/4 uniform, 1/4 per-instance foreground, 1/4 edge, 1/4 uncertain.
+    """Mask-loss points: 1/4 uniform, 1/4 per-instance foreground, 1/4 edge, 1/4 uncertain.
+
+    target: geometry dict of one record (geometry.derive_geometry); count: number of points (8192);
+    coarse: Q x H/4 x W/4 stride-4 mask logits of the same image. Foreground and edge points cycle over the
+    instances, so the smallest filament gets as many points as the largest; edge anchors get a Gaussian
+    jitter of 2 native pixels. As in PointRend (Kirillov et al., CVPR 2020), uncertain points are those
+    3x-oversampled uniform candidates whose highest query probability is closest to 0.5. Returns count x 2
+    normalized (x, y) coordinates snapped to native pixel centers.
 
     Cached fixed-size anchor lists avoid dynamic CUDA nonzero and synchronize
     only once for the small Hungarian assignment, not for pixel sampling.
@@ -89,12 +133,24 @@ def training_points(target, count, coarse):
 @torch.no_grad()
 def match_instances(logits, mask_logits, target_samples, dense_masks=None, occupancy=None, sample_weights=None,
                     mode='legacy'):
+    """Hungarian matching of one record's GT instances to queries (Mask2Former-style set prediction).
+
+    logits: Q x 2 class logits (index 0 = filament); mask_logits: Q x P query mask logits at P points;
+    target_samples: N x P GT labels (0/1) at the same points; sample_weights: optional P inverse-proposal
+    weights of importance-sampled points (native_area_points). Point BCE and soft Dice are computed for all
+    Q x N pairs as matrix products. Cost 'legacy': -2 P(filament) + 2 BCE + 5 Dice; cost 'pq':
+    -P(filament) * (1 - Dice) + 0.001 BCE. dense_masks (Q x h x w logits) together with occupancy
+    (N x H/4 x W/4 GT pixels per 4 x 4 cell) add 2 * (1 - soft IoU). scipy's linear_sum_assignment solves
+    the assignment on the CPU. Returns (query indices, GT indices), N of each, matched pairwise; raises
+    ValueError if N > Q.
+    """
     if target_samples.shape[0] == 0:
         empty = torch.empty(0, dtype=torch.long, device=logits.device)
         return empty, empty
     if target_samples.shape[0] > logits.shape[0]:
         raise ValueError("More annotated instances than queries")
     p, y = mask_logits.float().sigmoid(), target_samples.float()
+    # BCE(x, y) = softplus(x) - x * y for y in {0, 1}, so the pairwise mean BCE is one matrix product.
     if sample_weights is None:
         bce = F.softplus(mask_logits.float()).mean(-1, keepdim=True) - mask_logits.float() @ y.T / y.shape[-1]
         dice = 1 - (2 * p @ y.T + 1) / (p.sum(-1, keepdim=True) + y.sum(-1)[None] + 1)
@@ -130,6 +186,14 @@ def native_area_points(target, coarse_logits, count, uniform_fraction=.25, mode=
     each 4x4 cell. The active set contains *every* GT cell plus predicted support.
     Inverse proposal weights make foreground and background area estimates
     unbiased while providing many observations of the smallest filaments.
+
+    target['occupancy4']: N x H/4 x W/4 GT pixels per cell; coarse_logits: Q x H/4 x W/4 stride-4 mask
+    logits (predicted support: any query logit > -2, i.e. probability > 0.12). 'union': uniform_fraction
+    of the mass is uniform over all cells, the rest uniform over the union of GT and predicted cells.
+    'balanced_mixture' (final recipe): uniform_fraction uniform; half of the rest split equally between the
+    GT instances (uniform within each), half uniform over predicted cells. Returns points (count x 2
+    normalized (x, y) native pixel centers) and weights (count) = 1 / (number of cells * proposal(cell)):
+    the mean of weight * f over the samples is an unbiased estimate of the mean of f over all native pixels.
     """
     occupancy = target['occupancy4']
     h4, w4 = occupancy.shape[-2:]
@@ -167,6 +231,9 @@ def sampled_query_quality(native_logits, native_truth, weights, mask_threshold=.
     The inverse-proposal weights are essential: foreground-biased samples alone
     would overestimate IoU. The ratio is a finite-sample estimate of native IoU,
     not an exact full-image label. No objectness probability enters this target.
+
+    native_logits: Q x P, native_truth: N x P, weights: P (native_area_points). Masks are binarized at
+    mask_threshold. Returns Q values in [0, 1]: each query's best IoU with any GT instance (0 without GT).
     """
     if native_truth.shape[0] == 0:
         return native_logits.new_zeros(native_logits.shape[0], dtype=torch.float32)
@@ -178,6 +245,13 @@ def sampled_query_quality(native_logits, native_truth, weights, mask_threshold=.
 
 
 def fine_rois(output, index, rows, boxes, resolution):
+    """Native refined mask logits of matched queries, each on an R x R grid over its own GT instance's ROI.
+
+    rows: N matched query indices; boxes: N x 4 normalized (x0, y0, x1, y1) ROIs of the matched GT
+    instances (geometry 'rois'); resolution: R. Grid points are snapped to native pixel centers and use the
+    mask definition of masks.fine_mask_points (stride-2 basis plus sub-pixel phase residual), so they align
+    with the cached GT 'roi_masks'. Points outside the image get logit -20. Returns N x R x R logits.
+    """
     axis = (torch.arange(resolution, device=boxes.device) + 0.5) / resolution
     yy, xx = torch.meshgrid(axis, axis, indexing="ij")
     unit = torch.stack((xx, yy), -1)[None]
@@ -202,6 +276,10 @@ def native_iou_targets(output, index, rows, columns, target, chunk=2, mask_thres
 
     Geometry-biased point samples must never be used as IoU quality labels.
     Streaming bounds peak memory independently of the number of instances.
+
+    Returns one IoU per matched pair (rows[i], columns[i]): the query's full-resolution mask binarized at
+    mask_threshold against the unpacked GT mask, rendered `chunk` queries at a time. This is the quality-head
+    target for quality_target='assigned_exact'.
     """
     values = []
     for start in range(0, len(rows), chunk):
@@ -215,6 +293,33 @@ def native_iou_targets(output, index, rows, columns, target, chunk=2, mask_thres
 
 
 class FilamentCriterion(nn.Module):
+    """All training losses of a batch; forward() returns {term: weighted loss}, and their sum is minimized.
+
+    point_count: points per record for the mask losses (training_points). weights: per-term weights (see
+    self.weights; unknown names raise). The structural terms (topology, center_coverage, boundary_distance,
+    competition) ramp in linearly over the first `structural_warmup` epochs. Every term except 'pq' is
+    averaged over the records of the batch and multiplied by auxiliary_scale.
+
+    PQ surrogate. Each query has the inference score c = P(filament) * sigmoid(quality) * mean probability
+    on its foreground. pq_surrogate='soft' uses a soft detection sigmoid((c - pq_score_threshold) / T_score),
+    a soft pixel ownership softmax over queries of (log sigmoid(logit) + log c + log detection) / T_owner
+    (c and detection detached), owned masks sigmoid((logit - logit(pq_mask_threshold)) / T_mask) * ownership,
+    and a soft true positive sigmoid((IoU - pq_iou_threshold) / T_iou) of each matched owned mask. The
+    temperatures T anneal linearly from their initial to their *_final values over pq_temperature_epochs; the
+    final recipe uses score threshold 0.15 with T_score 0.05, T_owner 0.15, T_mask 0.5 and T_iou 0.1.
+    pq_surrogate='straight_through' uses the discrete inference decisions in the forward pass instead
+    (panoptic_surrogate.py, with the inference filters pq_min_area and pq_min_retained_fraction) and needs
+    pq_objective='linear'. pq_objective 'log' minimizes -log PQ, 'linear' 1 - PQ. pq_point_count native
+    pixels per record are drawn with the pq_sampling proposal (native_area_points).
+
+    quality_target: 'assigned_exact' = exact native IoU of each matched query's mask (0 for the others);
+    'best_native_sampled' (final recipe) = every query's best sampled IoU with any GT instance.
+    quality_hurdle replaces the target by IoU * 1{IoU > pq_iou_threshold} (off in the final recipe; it lowered
+    fold-0 PQ). matching_mode selects the Hungarian cost (match_instances). instance_temperature and
+    skeleton_recall_points configure the optional instance-discrimination and skeleton-recall terms, and
+    pilot_weight scales the mask-pilot reconstruction inside 'decoder_aux'.
+    """
+
     def __init__(self, point_count=8192, weights=None, topology_iterations=8, structural_warmup=5,
                  pq_iou_threshold=.5, pq_iou_temperature=.15,
                  pq_iou_temperature_final=.10, pq_score_threshold=.35,
@@ -242,6 +347,7 @@ class FilamentCriterion(nn.Module):
         if unknown:
             raise ValueError(f"Unknown loss weights: {sorted(unknown)}")
         self.weights.update(weights or {})
+        # Cross-entropy weights of (filament, no object); the down-weighted no-object class follows DETR.
         self.register_buffer("class_weights", torch.tensor([1.0, 0.1]))
         if min(pq_iou_temperature, pq_iou_temperature_final, pq_score_temperature,
                pq_score_temperature_final, pq_temperature_epochs) <= 0:
@@ -291,9 +397,18 @@ class FilamentCriterion(nn.Module):
         self.pq_mask_threshold, self.matching_mode = pq_mask_threshold, matching_mode
 
     def set_progress(self, epoch):
+        """Set the training progress in fractional epochs (temperature annealing and structural warm-up)."""
         self.progress = float(epoch)
 
     def forward(self, outputs, targets):
+        """Weighted loss terms of one batch.
+
+        outputs: model output dict (pred_logits B x Q x 2, pred_quality B x Q, pred_masks B x Q x H/4 x W/4,
+        the mask/phase embeddings and stride-2 bases rendered by masks.py, aux_outputs, seed_logits, the
+        optional dense heads and the training-only mask-pilot branch 'denoising'). targets: one geometry dict
+        per annotator record (data.FilamentDataset). Returns {term: weighted loss}; diagnostics such as the
+        batch's soft PQ are stored in self.last_stats.
+        """
         device = outputs["pred_logits"].device
         zero = outputs["pred_logits"].float().sum() * 0
         losses = {key: zero for key in self.weights}
@@ -308,6 +423,8 @@ class FilamentCriterion(nn.Module):
                 target = {**target, **{k: torch.from_numpy(v) for k, v in
                           derive_geometry(original["masks"].cpu().numpy().astype(bool)).items()}}
             target = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in target.items()}
+            # Two point sets: `points` (training_points) for the mask losses, and importance-sampled native
+            # pixels with inverse-proposal weights (native_area_points) for matching, quality and PQ.
             points = training_points(target, self.point_count, outputs["pred_masks"][index])
             truth = target_at_points(target, points)
             coarse = sample_features(outputs["pred_masks"][index:index + 1], points)[0]
@@ -318,11 +435,13 @@ class FilamentCriterion(nn.Module):
             native_logits = fine_mask_points(outputs, index, slice(None), area_points)
             rows, columns = match_instances(outputs['pred_logits'][index], native_logits, area_truth,
                                              sample_weights=area_weights, mode=self.matching_mode)
+            # Class targets: 0 (filament) for matched queries, 1 (no object) for all others.
             classes = torch.ones(outputs["pred_logits"].shape[1], dtype=torch.long, device=device)
             classes[rows] = 0
             def classification(prediction):
                 return F.cross_entropy(prediction["pred_logits"][index].float(), classes, weight=self.class_weights)
             losses["class"] = losses["class"] + classification(outputs)
+            # Zero-valued terms keep every output in the autograd graph, as DDP expects for all parameters.
             losses["mask"] = losses["mask"] + coarse.sum() * 0
             quality_truth = torch.zeros_like(outputs["pred_quality"][index], dtype=torch.float32)
             if self.quality_target == 'best_native_sampled':
@@ -337,10 +456,12 @@ class FilamentCriterion(nn.Module):
                 edge = sample_features(target["auxiliary"][None, 2:3], points, "nearest")[0, 0]
                 reliability = 1 - .25 * edge
                 def mask_loss(pred):
+                    """2 x point BCE (edge-band points weighted 0.75) + 5 x Dice of matched masks vs. their GT."""
                     bce = F.binary_cross_entropy_with_logits(pred.float(), gt, reduction="none")
                     return 2 * (bce * reliability).mean() + 5 * dice_loss(pred, gt)
                 losses["mask"] = losses["mask"] + mask_loss(coarse[rows])
                 losses["fine_mask"] = losses["fine_mask"] + mask_loss(fine[rows])
+                # area_iou: soft IoU of the stride-4 masks with each GT instance's pixel fraction per 4 x 4 cell.
                 occupancy = F.interpolate(target["occupancy4"][None, columns].float() / 16,
                                           size=outputs["pred_masks"].shape[-2:], mode="area")[0]
                 p = outputs["pred_masks"][index, rows].float().sigmoid()
@@ -360,9 +481,13 @@ class FilamentCriterion(nn.Module):
                     if self.weights["topology"]:
                         losses["topology"] = losses["topology"] + cldice_loss(roi, roi_gt, roi_sk, self.iterations)
                     if self.weights["boundary_distance"]:
+                        # Boundary loss (Kervadec et al., MIDL 2019) with the signed distance of the GT ROI
+                        # mask: probability outside the GT costs its distance, missing interior its depth.
                         distance = target["roi_distance"][columns].float()
                         losses["boundary_distance"] = losses["boundary_distance"] + ((roi.sigmoid() - roi_gt) * distance).mean()
                 if self.weights["center_coverage"]:
+                    # BCE towards 1 of each matched query's native logits on 128 skeleton anchors of its own
+                    # GT instance (the diagonal of the query x instance table).
                     skeleton = target["skeleton_points"][columns, :128].reshape(-1, 2)
                     coverage = fine_mask_points(outputs, index, rows, skeleton).reshape(len(rows), len(rows), -1)
                     diagonal = coverage[torch.arange(len(rows), device=device), torch.arange(len(rows), device=device)]
@@ -402,6 +527,7 @@ class FilamentCriterion(nn.Module):
             confidence = (outputs["pred_logits"][index].float().softmax(-1)[:, 0] *
                           outputs["pred_quality"][index].float().sigmoid() *
                           mean_foreground_probability)
+            # Temperatures anneal linearly from their initial to their final values over pq_temperature_epochs.
             temperature_progress = min(1., max(0., self.progress / self.pq_temperature_epochs))
             iou_temperature = self.pq_iou_temperature + temperature_progress * (
                 self.pq_iou_temperature_final - self.pq_iou_temperature)
@@ -426,6 +552,8 @@ class FilamentCriterion(nn.Module):
                     matched_ious.append(hard_stats['sampled_matched_owned_iou'].reshape(1))
                     matched_scores.append(confidence[rows].detach())
             else:
+                # Soft inference rule: detection gate, softmax pixel ownership over queries and a soft mask
+                # threshold; soft IoU and soft TP of each matched owned mask from the weighted native samples.
                 detection_probability = torch.sigmoid(
                     (confidence - self.pq_score_threshold) / score_temperature)
                 owner_logits = (F.logsigmoid(native_logits.float()) +
@@ -448,10 +576,13 @@ class FilamentCriterion(nn.Module):
                         (matched_iou - self.pq_iou_threshold) / iou_temperature)
                     match_probability = detection_probability[rows] * iou_probability
                     pq_numerator = pq_numerator + (match_probability * matched_iou).sum()
+                # TP + FP/2 + FN/2 = (#predictions + #GT) / 2, with the expected number of predictions
+                # equal to the sum of the detection probabilities.
                 pq_denominator = pq_denominator + .5 * (detection_probability.sum() + len(columns))
             if self.quality_hurdle:
                 quality_truth = quality_truth * (quality_truth > self.pq_iou_threshold)
             # Weight by the raw overlap so near misses are pushed firmly towards a zero hurdle target.
+            # Weight 1 for queries with overlap (raw IoU > .1, or matched for 'assigned_exact'), 0.1 otherwise.
             quality_foreground = quality_raw > .1 if self.quality_target == 'best_native_sampled' else classes == 0
             qweight = torch.where(quality_foreground, 1., .1)
             losses["quality"] = losses["quality"] + (F.binary_cross_entropy_with_logits(
@@ -469,6 +600,8 @@ class FilamentCriterion(nn.Module):
                 competition_logits = torch.cat((fine, fine.new_zeros(1, fine.shape[-1])), 0)[None]
                 ce = F.cross_entropy(competition_logits, owner[None], reduction="none")[0]
                 losses["competition"] = losses["competition"] + (ce * (count <= 1)).sum() / (count <= 1).sum().clamp_min(1)
+            # Deep supervision: intermediate decoder layers get the class and stride-4 mask losses of the final
+            # layer's matching.
             for prediction in outputs["aux_outputs"]:
                 value = classification(prediction) + prediction["pred_masks"][index].float().sum() * 0
                 if len(rows):
@@ -476,6 +609,9 @@ class FilamentCriterion(nn.Module):
                     value = value + 2 * F.binary_cross_entropy_with_logits(sampled, truth[columns]) + 5 * dice_loss(sampled, truth[columns])
                 losses["decoder_aux"] = losses["decoder_aux"] + value / max(1, len(outputs["aux_outputs"]))
             if 'denoising' in outputs:
+                # Mask pilots (MP-Former): slot i was guided by GT instance i and must reconstruct it; unused slots
+                # learn 'no object'. Refined native masks of the last layer plus class and stride-4 mask losses
+                # averaged over all layers.
                 pilot = outputs['denoising']
                 n = truth.shape[0]
                 classes_pilot = torch.ones(pilot['pred_logits'].shape[1], dtype=torch.long, device=device)
@@ -495,6 +631,8 @@ class FilamentCriterion(nn.Module):
                     value = value + auxiliary / (1 + len(pilot['aux_outputs']))
                 losses['decoder_aux'] = losses['decoder_aux'] + self.pilot_weight * value
                 pilot_losses.append(value.detach())
+            # Seed map (stride 4) against the GT skeleton channel, max-pooled from stride 2. Dense heads
+            # (stride 2) against auxiliary channel 0 = union of masks, 1 = skeletons, 2 = edge bands.
             aux = target["auxiliary"].float()
             seed_gt = F.adaptive_max_pool2d(aux[None, 1:2], outputs["seed_logits"].shape[-2:])[0]
             losses["seed"] = losses["seed"] + balanced_binary(outputs["seed_logits"][index].float(), seed_gt)
@@ -522,6 +660,8 @@ class FilamentCriterion(nn.Module):
         # nearly-zero PQ's gradient instead of leaving the primary signal tiny.
         primary = ((pq_denominator + 1e-8).log() - (pq_numerator + 1e-8).log()
                    if self.pq_objective == 'log' else 1 - soft_pq)
+        # Without any GT instance in the global batch PQ is undefined; the loss is then the denominator,
+        # half the expected number of detections, which only suppresses false positives.
         losses['pq'] = torch.where(pq_gt_count > 0, primary, pq_denominator)
         self.last_stats = {('soft_pq' if self.pq_surrogate == 'soft' else 'sampled_global_pq'): soft_pq.detach(),
                            'matched_native_iou': torch.cat(matched_ious).mean() if matched_ious else zero.detach(),
@@ -534,6 +674,8 @@ class FilamentCriterion(nn.Module):
         if panoptic_stats:
             self.last_stats.update({key: torch.stack([row[key] for row in panoptic_stats]).mean()
                                     for key in panoptic_stats[0]})
+        # 'pq' is already pooled over the batch; every other term becomes a per-record mean scaled by
+        # auxiliary_scale.
         return {key: value * self.weights[key] * (ramp if key in structural else 1.) *
                 (1 if key == "pq" else self.auxiliary_scale) /
                 (1 if key == "pq" else len(targets)) for key, value in losses.items()}

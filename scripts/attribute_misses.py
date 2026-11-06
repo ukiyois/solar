@@ -7,6 +7,13 @@ Categories (per GT instance and annotator record, at the given operating point):
   near_miss_0.3_0.5       best query IoU in (.3, .5]
   weak_0.1_0.3            best query IoU in (.1, .3]
   no_query                no query with IoU > .1
+
+Input: a fold-0 dump of scripts/dump_tta_candidates.py; the categories come from
+scripts/sweep_recall_tta.attribute. Output: JSON {group: {category: count}} for single-annotator and
+multi-annotator observations (one or several annotator records), overall and per GT area bin; the printed
+table shows the shares per group.
+
+usage: python -m scripts.attribute_misses --candidates runs/tta/<name>/val --output <attribution.json>
 """
 import argparse
 import json
@@ -18,6 +25,7 @@ from scripts.sweep_recall_tta import attribute, ground_truth, load
 
 
 def run(job):
+    """Pool worker: attribute() cases of one image, each tagged with the image's number of annotator records."""
     path, records, score, mask = job
     crops, binaries = load(path)
     cases = attribute(crops, binaries, records, score, mask)
@@ -27,10 +35,12 @@ def run(job):
 
 
 def area_bin(area):
+    """Label of the GT area bin (pixels)."""
     return "<500" if area < 500 else "500-1500" if area < 1500 else "1500-5000" if area < 5000 else ">=5000"
 
 
 def main():
+    """Attribute the misses on every fold-0 image, write the counts and print the shares per group."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidates", required=True)
     parser.add_argument("--score", type=float, default=.15)

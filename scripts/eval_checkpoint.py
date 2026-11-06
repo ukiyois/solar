@@ -2,7 +2,13 @@
 
 --context-size changes the backbone view resolution at inference (the detail
 path always runs at native resolution); useful to probe resolution effects.
-Also reports PQ split by GT instance area via the best-config records.
+The fold, the reference operating point (inference section) and the score x mask grid come from
+--train-config; scoring is solar_filaments.train.validate_grid (official PQ per annotator record, pooled).
+--output receives the reference-point metrics plus the grid optimum; <output stem>.records.json holds the
+grid table and the per-record counts at the best grid point. Needs a CUDA GPU and the native DCNv4 extension
+(scripts/build_dcnv4.py).
+
+usage: python -m scripts.eval_checkpoint --checkpoint <fold-0 model>.pt --output runs/checks/<name>.json
 """
 import argparse
 import json
@@ -17,6 +23,7 @@ from solar_filaments.train import validate_grid
 
 
 def main():
+    """Load the checkpoint, validate it on fold 0 and write the result JSON."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--context-size", type=int)

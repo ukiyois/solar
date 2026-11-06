@@ -43,8 +43,8 @@ from solar_filaments.model import limb_flattened  # noqa: E402
 
 ROOT = REPOSITORY / "data/raw/MAGFiLO_1.0_Kaggle_2026"
 SETTING = (1, .10, .40)  # votes, score, mask threshold of the submission
-RSUN_MM, SIGMA_MM, THRESHOLD_G = 696.0, 18.5, .5
-RNG = np.random.default_rng(0)
+RSUN_MM, SIGMA_MM, THRESHOLD_G = 696.0, 18.5, .5  # solar radius (Mm), B_LOS smoothing (Mm), PIL threshold (G)
+RNG = np.random.default_rng(0)  # fixed seed: pixel subsamples and random disk points are reproducible
 
 
 def load_magnetogram(pair, directories):
@@ -66,6 +66,13 @@ def load_magnetogram(pair, directories):
 
 
 def pil_distance(pair, directories):
+    """Projected distance (Mm) of every magnetogram pixel to the nearest polarity inversion line.
+
+    B_LOS is zeroed off the disk (r >= .98 R) and smoothed with a Gaussian of SIGMA_MM; PIL pixels are where
+    the 3 x 3-dilated regions >= +THRESHOLD_G and <= -THRESHOLD_G touch, inside r < .97 R. Pixel distances are
+    converted with RSUN_MM / radius (plane-of-sky scale at disk centre); without any PIL every distance is inf.
+    Returns (distance map, disk geometry (cy, cx, radius), fraction of PIL pixels inside r < .97 R).
+    """
     data, (cy, cx, radius) = load_magnetogram(pair, directories)
     yy, xx = np.mgrid[:data.shape[0], :data.shape[1]]
     rr = np.hypot(yy - cy, xx - cx) / radius
@@ -77,6 +84,11 @@ def pil_distance(pair, directories):
 
 
 def halpha(name):
+    """Disk geometry (cy, cx, radius in native pixels) and the 1024 px map of I/B - 1 of one training image.
+
+    The disk is every pixel above .25 x the 99th percentile (radius from its area); the map is computed as in
+    research/label_visibility.py.
+    """
     image = np.asarray(Image.open(ROOT / "train/train_images" / name).convert("L")).astype(np.float32)
     disk = image > .25 * np.quantile(image[::8, ::8], .99)
     ys, xs = np.nonzero(disk)
@@ -86,6 +98,12 @@ def halpha(name):
 
 
 def instance_stats(rle, hgeo, mgeo, distance, flat):
+    """PIL distance, area, contrast and mu of one instance mask.
+
+    Up to 400 random pixels of the mask are mapped from the H-alpha disk (hgeo) to the magnetogram disk (mgeo)
+    through disk-normalized coordinates and read from the distance map (nearest pixel); pil_mm is their median.
+    contrast is their mean I/B - 1, mu follows from their mean position and area counts every mask pixel.
+    """
     ys, xs = np.nonzero(mu.decode(rle))
     area = len(ys)
     if area > 400:
@@ -108,12 +126,14 @@ def null_distances(hgeo, mgeo, distance, n=500):
 
 
 def iou_matrix(predictions, truth):
+    """(n_predictions, n_truth) IoU matrix of two RLE lists; zeros when either list is empty."""
     if not predictions or not truth:
         return np.zeros((len(predictions), len(truth)))
     return np.asarray(mu.iou(predictions, truth, [0] * len(truth))).reshape(len(predictions), len(truth))
 
 
 def summary(values):
+    """Count, median and the shares within 10 and 20 Mm of a list of PIL distances."""
     v = np.asarray(values)
     if len(v) == 0:
         return {"n": 0}
@@ -122,6 +142,7 @@ def summary(values):
 
 
 def main():
+    """Measure annotated filaments, fold-0 predictions and random disk points against the PIL maps; write JSON."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--folder", required=True, help="fold-0 dump of scripts/dump_tta_candidates.py")
     parser.add_argument("--pairs", default=str(REPOSITORY / "research/magnetogram_pairs.csv"))
@@ -191,6 +212,7 @@ def main():
     for kind in ("pred_matched", "pred_near_miss", "pred_unsupported", "gt_missed"):
         result[f"fold0_{kind}"] = summary([r["pil_mm"] for r in model_rows if r["kind"] == kind])
     within = lambda key: result[key]["within_20mm"]
+    # enrichment: share of annotated filaments within 20 Mm of a PIL / the same share of random disk points
     result["enrichment_within_20mm"] = round(within("ALL_annotated_filaments") / within("ALL_null_random_disk_points"), 2)
     # centre-to-limb: if the share falls for filaments and random points alike, the magnetograms lose PILs, not filaments
     for lo, hi in ((.85, 1.01), (.6, .85), (0, .6)):
@@ -198,7 +220,7 @@ def main():
         result[f"{tag}_annotated"] = summary([r["pil_mm"] for r in annotated if lo <= r["mu"] < hi])
         result[f"{tag}_random"] = summary([d for _, m, d in null if lo <= m < hi])
         result[f"{tag}_enrichment_within_20mm"] = round(within(f"{tag}_annotated") / within(f"{tag}_random"), 2)
-    Path(args.output).write_text(json.dumps(result, indent=1))
+    Path(args.output).write_text(json.dumps(result, indent=1), encoding="utf-8", newline="\n")
     print(json.dumps({k: v for k, v in result.items() if k.startswith(("ALL_null", "ALL_annotated_filaments", "fold0", "enrich", "mu_"))},
                      indent=1))
 

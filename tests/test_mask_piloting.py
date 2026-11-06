@@ -1,4 +1,8 @@
-"""Training-only mask pilots: no GT path into ordinary inference queries."""
+"""Training-only mask pilots: no GT path into ordinary inference queries.
+
+Mask pilots (MP-Former) are extra decoder queries that receive noised GT masks as attention guides during
+training only (solar_filaments.piloting). These tests run the diagnostic model on CPU.
+"""
 import unittest
 import numpy as np
 import torch
@@ -12,6 +16,7 @@ torch.set_num_threads(2)
 
 
 def target(empty=False):
+    """Geometry targets of two thin horizontal filaments on a 64 x 64 image (no instance if empty)."""
     masks = np.zeros((0 if empty else 2, 64, 64), bool)
     if not empty:
         masks[0, 12:15, 5:54] = True
@@ -20,6 +25,7 @@ def target(empty=False):
 
 
 def config(pilots):
+    """Diagnostic model configuration with `pilots` pilot slots (0 = no pilot branch)."""
     result = model_config(read_config('configs/diagnostic.yaml'))
     result.denoising_queries = pilots
     result.query_detail_points = 16
@@ -27,7 +33,12 @@ def config(pilots):
 
 
 class MaskPilotingTests(unittest.TestCase):
+    """Protects the pilot guides and their noise, and that the pilot branch never changes inference outputs
+    or the ordinary queries, while its losses still back-propagate finite gradients (also with empty targets)."""
+
     def test_thin_support_padding_and_capacity(self):
+        """Thin instances keep a non-empty guide, unused slots stay empty, 0 slots disable the pilots and more
+        GT instances than slots raise."""
         t = target()
         guides = prepare_mask_pilots([t], 4)
         self.assertEqual(guides.dtype, torch.bool)

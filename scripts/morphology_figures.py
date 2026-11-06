@@ -2,11 +2,18 @@
 
 fold-0 mode: predictions are fused TTA candidates (submission setting) and every annotator record of the
 image is drawn; images are chosen from rubric_metrics' per_record.json (best / median / hardest by
-semantic Dice among images with several filaments) unless --stems is given.
-test mode (--csv): predictions are read from a submission CSV (no ground truth exists).
+semantic Dice among images with several filaments) unless --stems is given. "Several" means records with
+>= 4 annotated filaments; an image is ranked by the mean semantic Dice of those records.
+test mode (--csv): predictions are read from a submission CSV (no ground truth exists); by default the
+observations with the most, a median number and the fewest predicted instances are drawn.
 
 Each figure: top row full disk (image | ground truth | prediction), bottom row the same 512 px window
 around the largest predicted filament, so thin spines, barbs and boundaries are visible.
+Output: <output-dir>/morphology_<stem>.png per observation.
+
+usage: python -m scripts.morphology_figures --folders runs/tta/<name>/val --folder-views d0,d1,d2,d3,f0,f1,f2,f3 \
+           --per-record docs/figures/rubric_fold0/per_record.json --output-dir docs/figures/morphology
+       python -m scripts.morphology_figures --csv submission.csv --output-dir docs/figures/morphology_test
 """
 import argparse
 import csv
@@ -34,6 +41,10 @@ def draw(image, masks, styles):
 
 
 def window(masks, size=512, shape=(2048, 2048)):
+    """(row slice, column slice) of a size x size window centered on the centroid of the largest mask.
+
+    The window is shifted to lie inside the image; without masks it is the central window.
+    """
     if not masks:
         return slice(768, 1280), slice(768, 1280)
     largest = max(masks, key=lambda m: m.sum())
@@ -45,6 +56,13 @@ def window(masks, size=512, shape=(2048, 2048)):
 
 
 def figure(stem, image, truth_records, predictions, out, title):
+    """Write <out>/morphology_<stem>.png: image | ground truth | prediction, full disk and 512 px window.
+
+    truth_records: [(record id, GT RLEs)]; it is empty in test mode, which drops the ground-truth column. GT
+    outlines are colored per annotator record (yellow / cyan / magenta), predictions one color per instance.
+    The window follows the largest prediction (the largest GT instance if nothing is predicted); the full
+    disk is shown downsampled to 1024 px, the window at native resolution.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -79,6 +97,7 @@ def figure(stem, image, truth_records, predictions, out, title):
 
 
 def main():
+    """Draw the fold-0 figures, or the test figures from a submission CSV with --csv."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="*", default=[])
     parser.add_argument("--folder-views", nargs="*", default=[])

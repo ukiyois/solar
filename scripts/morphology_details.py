@@ -27,15 +27,25 @@ from scripts.fuse_tta import predict
 from scripts.sweep_recall_tta import ground_truth
 
 ROOT = Path("data/raw/MAGFiLO_1.0_Kaggle_2026/train/train_images")
+# outline colors (RGB): annotator yellow, prediction cyan; every panel is drawn at DISPLAY x DISPLAY px
 GT_COLOR, PRED_COLOR, DISPLAY = (255, 214, 0), (0, 200, 255), 320
 
 
 def parts(rle):
+    """Number of 8-connected parts with >= 32 px in a mask (counted as in shape_statistics)."""
     _, _, stats, _ = cv2.connectedComponentsWithStats(mu.decode(rle).astype(np.uint8), connectivity=8)
     return int((stats[1:, cv2.CC_STAT_AREA] >= 32).sum())
 
 
 def collect(job):
+    """Pool worker: the example candidates of one fold-0 image for the three rows.
+
+    job = (stem, [(record id, GT RLEs)], folders, views, (votes, score, mask)). Returns (matched, missed,
+    multipart): matched GT instances (best IoU > .5, area >= 1500 px) with their best prediction; missed small
+    GT instances (best IoU <= .5, area < 400 px) with all predictions of the image; and predictions with >= 2
+    parts together with the GT instances of the record that overlaps them most. GT instances are collected
+    per annotator record, so one filament can appear once per record.
+    """
     stem, records, folders, views, setting = job
     _, kept = predict((stem, folders, views, setting))
     predictions = [p["rle"] for p in kept]
@@ -64,12 +74,17 @@ def collect(job):
 
 
 def spread(items, count):
+    """`count` items at evenly spaced interior positions of a sorted list (both ends excluded); all if few."""
     if len(items) <= count:
         return items
     return [items[int(round(q * (len(items) - 1)))] for q in np.linspace(.0, 1., count + 2)[1:-1]]
 
 
 def window(rle, pad=40, minimum=192):
+    """Square window around a mask: bounding box + `pad` px per side, at least `minimum` px, inside the image.
+
+    Returns (y0, x0, side) in pixels of the 2048 x 2048 image.
+    """
     x, y, w, h = mu.toBbox(rle)
     side = int(min(2048, max(max(w, h) + 2 * pad, minimum)))
     cx, cy = x + w / 2, y + h / 2
@@ -79,7 +94,7 @@ def window(rle, pad=40, minimum=192):
 
 
 def panel(stem, focus, outlines, widen=0):
-    """Crop around `focus`, upscale to DISPLAY px, draw (rle, color, thickness + widen) outlines; returns (RGB, side)."""
+    """Crop around `focus`, resize to DISPLAY px, draw (rle, color, thickness + widen) outlines; returns (RGB, side)."""
     image = np.asarray(Image.open(ROOT / f"{stem}.jpeg").convert("L"))
     y0, x0, side = window(focus)
     crop = cv2.resize(image[y0:y0 + side, x0:x0 + side], (DISPLAY, DISPLAY), interpolation=cv2.INTER_CUBIC)
@@ -95,6 +110,12 @@ def panel(stem, focus, outlines, widen=0):
 
 
 def draw(rows, output, paper=False):
+    """Draw the 3 x 4 grid of close-ups and save it to `output`.
+
+    rows: [(row label, short row tag, [(stem, focus RLE, outlines, title, tag), ...])]. The report version has
+    a title per panel; paper=True gives a 3.5 inch single-column figure with a short tag per tile and wider
+    outlines, saved at 300 dpi.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -132,6 +153,7 @@ def draw(rows, output, paper=False):
 
 
 def main():
+    """Collect the fold-0 examples, draw the figure(s) and write the example counts to <output stem>.json."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)

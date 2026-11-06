@@ -14,6 +14,10 @@ Enumerate groups with at most one GT per annotator. Every physically feasible
 prediction maps to one such group. Relax spatial feasibility and binary group
 selection to fractional set packing. The resulting optimum is an upper bound.
 This script reads only the competition TRAIN annotations in the selected fold.
+
+The bound is found by bisection on the target PQ (certificate()); --target is also tested on its own.
+
+usage (repository root): python research/pq_annotation_upper_bound.py [--fold 0] [--target .7]
 """
 import argparse
 from collections import defaultdict
@@ -30,6 +34,15 @@ from solar_filaments.data import FilamentDataset
 
 
 def construct(ds):
+    """One fractional set-packing problem per physical image of the dataset split.
+
+    The GT instances of all annotator records of an image (at most three) are rasterized; an overlap inside
+    one record raises, since the one-to-one argument needs disjoint GT. Groups take at most one GT per record:
+    single GT instances (weight 1), cross-record pairs with IoU > 0 (weight 1 + IoU) and, with three records,
+    triples whose three pairwise IoUs are > 0 (weight 1.5 + y, y as in the module docstring). A weight bounds
+    the IoU sum one prediction can earn on its group. Returns dicts with file name, annotator count, GT
+    count, group weights and the sparse GT x group incidence matrix.
+    """
     by_file = defaultdict(list)
     for r in ds.records:
         by_file[r['file_name']].append(r)
@@ -73,6 +86,14 @@ def construct(ds):
 
 
 def certificate(problems, score):
+    """Test the target PQ `score`; a negative first return value proves it unreachable.
+
+    PQ >= score requires 2 sum(IoU) - score (sum m P + total GT) >= 0 (pooled denominator of the module
+    docstring; m = annotator count, P = prediction count of an image). A prediction on a group of weight w adds
+    at most 2 w - score m to the left side, so each image contributes at most the optimum of its relaxed
+    packing (each GT in at most one group, 0 <= x <= 1, solved with HiGHS). Returns
+    (sum of the image optima minus score x total GT, per-image terms).
+    """
     terms = []
     total_gt = sum(p['GT'] for p in problems)
     for p in problems:
@@ -88,6 +109,7 @@ def certificate(problems, score):
 
 
 def main():
+    """Build the problems of the fold, test --target and bisect the largest PQ the bound does not rule out."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-root', default='data/raw/MAGFiLO_1.0_Kaggle_2026')
     parser.add_argument('--fold', type=int, default=0)
@@ -97,6 +119,7 @@ def main():
     ds = FilamentDataset(args.data_root, 'val', fold=args.fold, geometry=False, decode_masks=False)
     problems = construct(ds)
     gap, terms = certificate(problems, args.target)
+    # bisection: largest target whose certificate stays positive (20 halvings of [0, 1])
     lo, hi = 0., 1.
     for _ in range(20):
         middle = (lo + hi) / 2

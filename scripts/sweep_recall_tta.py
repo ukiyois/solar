@@ -1,10 +1,20 @@
 """CPU post-processing over dumped query crops: TTA instance fusion, threshold
 sweeps, miss attribution, and test submission export.
 
+Input: a folder with one <image stem>.npz per image from scripts/dump_tta_candidates.py (FP16 probability
+crops of the candidate queries of every dihedral view, see load()). All images are 2048 x 2048 px.
+
 Ownership follows solar_filaments.inference.instance_predictions exactly
 (score-ordered pixel competition on probability*score, min area, retained
 fraction). Fusion clusters candidates from different dihedral views by binary
 IoU, then averages their probability crops.
+
+The default mode sweeps view sets x fusion modes x votes x score / mask / retain thresholds over the fold-0
+validation images, scores every annotator record with the official PQ and attributes the misses of the
+single-view baseline (view d0, score .15, mask .725). --test exports a submission CSV with the first value
+of every option. fuse() and ownership() are shared with scripts/fuse_tta.py, which wrote the final submission.
+
+usage (repository root): python -m scripts.sweep_recall_tta --candidates runs/tta/<name>/val --output <sweep.json>
 """
 import argparse
 from collections import Counter, defaultdict
@@ -20,7 +30,8 @@ from pycocotools import mask as mu
 from solar_filaments.data import FilamentDataset
 from solar_filaments.metrics import aggregate_pq, official_pq
 
-SIZE = (2048, 2048)
+SIZE = (2048, 2048)  # every competition image (and every archive frame) is 2048 x 2048 px
+# View sets compared by the sweep: d<k> = rotation by k * 90 degrees, f<k> = flipped and rotated.
 SETS = {
     "single": ["d0"],
     "flip4": ["d0", "f0", "d2", "f2"],
@@ -30,6 +41,10 @@ SETS = {
 
 
 def full_rle(binary, box):
+    """COCO RLE of a binary crop pasted into an empty 2048 x 2048 canvas at box = (y0, y1, x0, x1).
+
+    Box ends are exclusive. Returns the pycocotools dict {"size": [2048, 2048], "counts": bytes}.
+    """
     y0, y1, x0, x1 = box
     canvas = np.zeros(SIZE, dtype=np.uint8)
     canvas[y0:y1, x0:x1] = binary
@@ -38,6 +53,14 @@ def full_rle(binary, box):
 
 
 def load(path):
+    """Read one candidate dump (<image stem>.npz) of scripts/dump_tta_candidates.py.
+
+    The archive holds `meta`, a JSON list with one entry per stored query, and one FP16 probability crop per
+    entry with a box, stored under the entry's key "<view>_<i>". Returns (crops, binaries). crops: dicts
+    {variant (view name), query, score, box = (y0, y1, x0, x1) in full-image pixels, prob (float32 crop)}.
+    binaries: the low-score d0 queries kept only as a binary mask, dicts {query, score, rle} with a
+    pycocotools RLE; they are used for miss attribution only.
+    """
     z = np.load(path)
     meta = json.loads(str(z["meta"]))
     crops, binaries = [], []
@@ -52,6 +75,18 @@ def load(path):
 
 
 def fuse(crops, variants, mode, cluster_threshold=.5, cluster_iou=.5):
+    """Fuse the candidates of several views (voters) into one candidate list, highest score first.
+
+    Candidates of the views in `variants` are visited in descending score order. Each one joins the cluster
+    whose representative (its first, highest-scoring member) overlaps it most, with IoU > cluster_iou between
+    the masks binarized at probability cluster_threshold, unless that cluster already has a member from the
+    same view; then the next-best cluster above the IoU threshold is tried, otherwise a new cluster starts.
+    So each view votes at most once per cluster. The fused probability is the member sum on the union box
+    divided by the number of views (mode "all": absent views count as zero) or by the number of members
+    (mode "members": mean over the members). The fused score is the summed member score divided by the number
+    of views in both modes, which down-weights instances found by few views; "votes" is the member count.
+    With a single view the candidates are only filtered and sorted (no "votes" key).
+    """
     pool = sorted((c for c in crops if c["variant"] in variants), key=lambda c: -c["score"])
     if len(variants) == 1:
         return pool
@@ -92,6 +127,16 @@ def fuse(crops, variants, mode, cluster_threshold=.5, cluster_iou=.5):
 
 
 def ownership(candidates, score_threshold, mask_threshold, min_area=32, retain=.5, min_votes=1):
+    """Select instances and resolve overlaps by pixel competition (the rule of instance_predictions).
+
+    `candidates` must be sorted by descending score, as fuse() returns them. A candidate takes part if its
+    score >= score_threshold and votes >= min_votes, its mask binarized at mask_threshold has >= min_area
+    pixels, and its score times the mean foreground probability still passes score_threshold. Each pixel goes
+    to the candidate with the highest probability x rescored score (ties keep the earlier candidate). A
+    candidate then keeps only the pixels it won and is dropped if fewer than min_area pixels or less than
+    `retain` of its binarized area remain. Returns non-overlapping instances in candidate order as dicts
+    {rle (full-image pycocotools RLE), score (rescored), area (retained pixels)}.
+    """
     winning = np.zeros(SIZE, dtype=np.float32)
     labels = np.zeros(SIZE, dtype=np.int32)
     kept = {}
@@ -107,6 +152,7 @@ def ownership(candidates, score_threshold, mask_threshold, min_area=32, retain=.
             continue
         y0, y1, x0, x1 = c["box"]
         confidence = c["prob"] * score
+        # numpy views: writing into the windows updates the full-image canvases in place
         window_w, window_l = winning[y0:y1, x0:x1], labels[y0:y1, x0:x1]
         replace = foreground & (confidence > window_w)
         window_w[replace] = confidence[replace]
@@ -124,6 +170,12 @@ def ownership(candidates, score_threshold, mask_threshold, min_area=32, retain=.
 
 
 def ground_truth():
+    """Fold-0 validation labels as {file name: [(record id, [RLE per annotated filament]), ...]}.
+
+    Fold 0 of the 5 physical-image folds with seed 2026, the training default. Each annotator record is one
+    entry, and several records can share one observation (file). The polygons of an instance are merged into
+    one pycocotools RLE. The data root is relative, so run from the repository root.
+    """
     dataset = FilamentDataset("data/raw/MAGFiLO_1.0_Kaggle_2026", "val", 0, 5, 2026,
                               geometry=False, image_uint8=True, decode_masks=False)
     by_file = defaultdict(list)
@@ -137,6 +189,10 @@ def ground_truth():
 
 
 def configurations(args):
+    """Expand the option grid into (set, mode, min_votes, score, mask, retain) tuples.
+
+    A single-view set is evaluated without fusion (mode "single") and with one vote only.
+    """
     configs = []
     for name in args.sets:
         modes = ["single"] if len(SETS[name]) == 1 else args.modes
@@ -149,6 +205,11 @@ def configurations(args):
 
 
 def evaluate_image(job):
+    """Pool worker: score every configuration on one validation image.
+
+    job = (dump path, [(record id, GT RLEs)], configurations). Fusion runs once per (set, mode) and is reused
+    for all thresholds. Returns ({configuration: [official_pq row per record]}, attribute() cases).
+    """
     path, records, configs = job
     crops, binaries = load(path)
     fused_cache = {}
@@ -166,7 +227,16 @@ def evaluate_image(job):
 
 
 def attribute(crops, binaries, records, score_threshold=.15, mask_threshold=.725):
-    """Why each GT is missed by the single-view baseline operating point."""
+    """Why each GT is missed by the single-view baseline operating point.
+
+    The baseline is view d0 alone with ownership() at score_threshold / mask_threshold. Each GT instance of
+    each record gets one category: matched (a kept prediction has IoU > .5); query_ok_score_below_threshold
+    (d0 queries reach IoU > .5, but all of them score below the threshold); query_ok_lost_in_ownership_or_mean_prob
+    (such a query passes the score threshold but is removed by the area filters, the mean-probability rescoring
+    or the pixel competition); otherwise the bin of the best d0 query IoU (.3-.5, .1-.3, <= .1). The d0 queries
+    include the low-score binaries, which keep the probability threshold they were dumped at. best_tta_iou is
+    the best IoU of any other-view candidate binarized at mask_threshold. Returns one dict per GT instance.
+    """
     d0 = [c for c in crops if c["variant"] == "d0"]
     final = [p["rle"] for p in ownership(sorted(d0, key=lambda c: -c["score"]), score_threshold, mask_threshold)]
     queries = [(c["score"], full_rle((c["prob"] >= mask_threshold).astype(np.uint8), c["box"])) for c in d0]
@@ -200,10 +270,19 @@ def attribute(crops, binaries, records, score_threshold=.15, mask_threshold=.725
 
 
 def area_bin(area):
+    """Label of the GT area bin (pixels) used in the attribution tables."""
     return "<500" if area < 500 else "500-1500" if area < 1500 else "1500-5000" if area < 5000 else ">=5000"
 
 
 def run_validation(args):
+    """Sweep every configuration over the fold-0 validation images and write the JSON report to --output.
+
+    Report keys: summary (one row per configuration with pooled PQ / SQ / RQ and counts, best PQ first);
+    attribution (baseline miss categories overall and by GT area, plus the oracle recalls of the d0 queries and
+    of all views); cases (one attribute() row per GT instance); records (per-record PQ rows of the
+    --keep-records best configurations and of the baseline). With --partial only the images whose dump
+    already exists are scored.
+    """
     truth = ground_truth()
     folder = Path(args.candidates)
     configs = configurations(args)
@@ -253,6 +332,7 @@ def run_validation(args):
 
 
 def predict_image(job):
+    """Pool worker: apply one configuration to one test image; returns (stem, ownership() instances)."""
     path, set_name, mode, votes, score, mask, retain = job
     crops, _ = load(path)
     predictions = ownership(fuse(crops, SETS[set_name], mode), score, mask, retain=retain, min_votes=votes)
@@ -260,6 +340,11 @@ def predict_image(job):
 
 
 def run_test(args):
+    """Write a submission CSV with the first value of every option.
+
+    Images follow the dump's manifest.json. Each row is filament_id = "<image stem>_<n>" (n counts from 1 per
+    image, in ownership order) and segmentation_rle = the COCO compressed RLE string of the full-size mask.
+    """
     folder = Path(args.candidates)
     manifest = json.loads((folder / "manifest.json").read_text())
     stems = [Path(name).stem for name in manifest["files"]]
@@ -282,6 +367,7 @@ def run_test(args):
 
 
 def main():
+    """Command-line entry point: validation sweep, or CSV export with --test."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidates", required=True)
     parser.add_argument("--output", required=True)

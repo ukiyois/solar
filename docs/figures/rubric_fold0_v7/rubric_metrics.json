@@ -49,5 +49,39 @@
   "votes": 1,
   "score": 0.1,
   "mask": 0.4
+ },
+ "bootstrap": {
+  "observations": 120,
+  "samples": 4000,
+  "ci95": {
+   "pq": [
+    0.4073,
+    0.463
+   ],
+   "sq": [
+    0.6691,
+    0.6838
+   ],
+   "rq": [
+    0.6051,
+    0.6823
+   ],
+   "pair_iou_mean": [
+    0.5594,
+    0.6
+   ],
+   "pair_dice_mean": [
+    0.6899,
+    0.7301
+   ],
+   "semantic_dice_mean": [
+    0.6307,
+    0.6852
+   ],
+   "semantic_dice_global": [
+    0.6691,
+    0.7124
+   ]
+  }
  }
 }

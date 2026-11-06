@@ -24,10 +24,12 @@ torch.set_num_threads(2)
 
 
 def diagnostic(**changes):
+    """Diagnostic model configuration with the given fields replaced."""
     return replace(model_config(read_config("configs/diagnostic.yaml")), **changes)
 
 
 def two_filaments(h=96, w=128):
+    """Masks of two horizontal filaments and the auxiliary target (3 channels of the 2 x 2 max-pooled union)."""
     masks = torch.zeros(2, h, w, dtype=torch.bool)
     masks[0, 20:24, 10:115], masks[1, 60:65, 30:90] = True, True
     auxiliary = F.max_pool2d(masks.any(0).float()[None, None].repeat(1, 3, 1, 1), 2)[0]
@@ -35,6 +37,11 @@ def two_filaments(h=96, w=128):
 
 
 class V9Tests(unittest.TestCase):
+    """Protects the v9 training recipe: optional losses with heads disabled, the hurdle quality target, warm
+    starts into a changed architecture, epoch sampling of the pseudo-label mixture, limb flattening, exact
+    quarter-turn augmentation of polygons, fast evaluation equal to reference inference + official PQ,
+    rejection of retired checkpoint options and atomic checkpoint saves."""
+
     def setUp(self):
         torch.manual_seed(2026)
 
@@ -76,6 +83,8 @@ class V9Tests(unittest.TestCase):
             self.assertTrue(torch.isfinite(grad).all())
 
     def test_warmstart_cuts_dead_modules_and_zero_widens_inputs(self):
+        """load_warmstart drops the weights of modules the new model lacks and zero-initializes its extra input
+        channel (limb-flattened darkness), so the detail path still computes the old function."""
         source, _ = build_model(diagnostic(), load_backbone=False)
         target, _ = build_model(diagnostic(mask_feedback=False, auxiliary_heads=False, detail_flattening=True),
                                 load_backbone=False)
@@ -168,6 +177,8 @@ class V9Tests(unittest.TestCase):
 
 
     def test_checkpoint_config_accepts_only_neutral_retired_options(self):
+        """Retired options in a saved model config load only at their neutral values; an active one (e.g.
+        annotator ids) raises instead of being silently ignored."""
         saved = config_dict(diagnostic())
         neutral = {**saved, "memory_mode": "pooled", "decoder_mode": "global", "dynamic_mask": False,
                    "annotators": [], "hypotheses": 0, "curve_attention_points": 7}

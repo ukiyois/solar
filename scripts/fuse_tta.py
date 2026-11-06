@@ -7,7 +7,8 @@ probabilities are averaged and the fused score is the summed member score divide
 voters ('members' rule). A fused instance is kept if it has >= votes members, score >= score and,
 after binarization at `mask`, wins its pixels in the score-ordered pixel competition of
 solar_filaments.inference (min area 32 px, >= 50 % of its area retained). Validation reports the
-official PQ over a grid; --test exports the CSV with the first value of each option.
+official PQ over a grid; --test exports the CSV with the first value of each option (for --votes, the
+smallest resulting vote count).
 
 usage (final submission, votes 1/8, score .10, mask .40):
   python -m scripts.fuse_tta --folders runs/tta/final_a/test --votes 0.125 --scores 0.10 --masks 0.40 \
@@ -30,7 +31,11 @@ VIEWS = ["d0", "d1", "d2", "d3", "f0", "f1", "f2", "f3"]
 
 
 def pooled_candidates(stem, folders, views):
-    """views: one list shared by every folder, or a list of per-folder lists."""
+    """Load one image's candidates from every dump folder and tag each with its voter "<folder index>:<view>".
+
+    views: one list shared by every folder, or a list of per-folder lists. Returns (crops, voters); voters
+    lists every (folder, view) pair, the set that fuse() counts votes over.
+    """
     per_folder = views if views and isinstance(views[0], (list, tuple)) else [views] * len(folders)
     crops = []
     for index, (folder, own) in enumerate(zip(folders, per_folder)):
@@ -42,6 +47,11 @@ def pooled_candidates(stem, folders, views):
 
 
 def evaluate(job):
+    """Pool worker: official PQ rows of one fold-0 image for every (votes, score, mask) of the grid.
+
+    job = (stem, [(record id, GT RLEs)], folders, views, grid). Fusion runs once per image ('members' rule).
+    Returns {(votes, score, mask): [official_pq row per annotator record]}.
+    """
     stem, records, folders, views, grid = job
     crops, voters = pooled_candidates(stem, folders, views)
     fused = fuse(crops, voters, "members")
@@ -53,12 +63,18 @@ def evaluate(job):
 
 
 def predict(job):
+    """Submission rule for one image: job = (stem, folders, views, (votes, score, mask)).
+
+    Returns (stem, ownership() instances). The analysis scripts reuse it to score exactly what a submission
+    would contain.
+    """
     stem, folders, views, (votes, score, mask) = job
     crops, voters = pooled_candidates(stem, folders, views)
     return stem, ownership(fuse(crops, voters, "members"), score, mask, min_votes=votes)
 
 
 def main():
+    """Fold-0 grid search (JSON table, best PQ first), or the submission CSV with --test."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True, help="Candidate dumps, one per model")
     parser.add_argument("--views", nargs="+", default=VIEWS)
@@ -77,6 +93,7 @@ def main():
             parser.error("--folder-views needs one entry per folder")
         args.views = [v.split(",") for v in args.folder_views]
     voters = sum(len(v) for v in args.views) if isinstance(args.views[0], list) else len(args.folders) * len(args.views)
+    # vote fractions -> member counts (at least 1); e.g. 0.125 of 8 voters = 1
     votes = sorted({max(1, int(round(f * voters))) for f in args.votes})
     if args.test:
         setting = (votes[0], args.scores[0], args.masks[0])

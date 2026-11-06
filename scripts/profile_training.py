@@ -1,4 +1,14 @@
-"""Profile forward, full task loss and backward. Never updates parameters."""
+"""Profile forward, full task loss and backward. Never updates parameters.
+
+One record of the fold-0 training split (default "worst": the record with the most annotated instances) is
+resized to --size px and repeated --batch-size times. Each of --repeats steps times
+forward, criterion and backward separately; the report adds the peak CUDA memory and fails on a non-finite
+loss or gradient. --reserve-adam / --reserve-ema allocate the optimizer and EMA state tensors so the peak
+includes their memory. --checkpoint warm-starts from a trained model; without it the ImageNet backbone of
+scripts/download_weights.py is loaded. Needs a CUDA GPU; the JSON report goes to --output.
+
+usage: python scripts/profile_training.py [--config configs/flash_large.yaml] [--size 512] [--checkpoint <.pt>]
+"""
 import argparse
 import json
 from pathlib import Path
@@ -15,6 +25,7 @@ from solar_filaments.piloting import prepare_mask_pilots
 
 
 def main():
+    """Run the profile on one record and write the JSON report."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/flash_large.yaml")
     parser.add_argument('--checkpoint')

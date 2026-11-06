@@ -1,4 +1,12 @@
-"""Mechanical checks of a submission CSV before uploading."""
+"""Mechanical checks of a submission CSV before uploading.
+
+Asserts the header (filament_id, segmentation_rle), unique ids, that the image part of every id
+("<test image stem>_<n>") names an existing test image, that every RLE (read as a 2048 x 2048 mask) is
+non-empty, and that no two instances of an image share a pixel. Prints counts, images without predictions,
+the area range and the file's SHA-256.
+
+usage (repository root): python scripts/validate_submission.py submission.csv
+"""
 import argparse
 import csv
 import hashlib
@@ -11,6 +19,7 @@ from pycocotools import mask as mu
 
 
 def main():
+    """Run the checks on one CSV; an AssertionError names the first failed check."""
     parser = argparse.ArgumentParser()
     parser.add_argument("csv")
     parser.add_argument("--test-dir", default="data/raw/MAGFiLO_1.0_Kaggle_2026/test/test_images")

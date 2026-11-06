@@ -12,7 +12,9 @@ Annotator agreement (observations with several records): share of the other reco
 with IoU > .5 to it. Model status (fold 0, the fold-0 model at the submission setting): matched (IoU > .5), near
 miss (best IoU in (.1, .5]) or absent (best IoU <= .1). Model vs human: the model scored against every fold-0
 record and every ordered pair of records on the same observations scored the same way (Hungarian matching,
-PQ at IoU thresholds .3-.6, error profile at .5).
+PQ at IoU thresholds .3-.6, error profile at .5). A paired bootstrap over the fold-0 observations with several
+records gives 95 % intervals of both PQs at IoU > .5 and of their difference. --replot only redraws the
+figure from an existing --output JSON.
 
 usage (repository root; --folder is a fold-0 dump of scripts/dump_tta_candidates.py, see README):
   python research/label_visibility.py --folder runs/tta/<fold-0 model>/val
@@ -43,10 +45,11 @@ CONTRAST_EDGES = [-1, -.20, -.14, -.10, -.07, -.04, 1]
 AREA_EDGES = [0, 500, 1500, 5000, 1e9]
 MU_EDGES = [0, .5, .7, .85, 1.01]
 CONTRAST_SIGMA_EDGES = [-100, 1, 2, 3, 5, 100]  # -C in units of the observation's quiet-Sun texture sigma
-THRESHOLDS = (.3, .4, .5, .6)
+THRESHOLDS = (.3, .4, .5, .6)  # IoU thresholds of the model-vs-human PQ comparison
 
 
 def records_by_observation():
+    """{image stem: [(record id, [RLE per instance]), ...]} for every training observation (all folds), by stem."""
     data = json.loads((ROOT / "train/MAGFiLO_1.0_Annotations_kaggle2026_train.json").read_text(encoding="utf-8"))
     by_record = defaultdict(list)
     for annotation in data["annotations"]:
@@ -59,6 +62,7 @@ def records_by_observation():
 
 
 def half(a):
+    """2 x 2 mean pooling of a 2048 x 2048 array to 1024 x 1024."""
     return a.reshape(1024, 2, 1024, 2).mean((1, 3))
 
 
@@ -77,7 +81,12 @@ def texture(stem):
 
 
 def observables(stem, rles):
-    """At 1024 px (2 x 2 mean); factor 4 / sigma 4 keeps the native background scale. None for empty masks."""
+    """Contrast, area and disk position of each instance mask of one observation; None for empty masks.
+
+    At 1024 px (2 x 2 mean); factor 4 / sigma 4 keeps the native background scale. contrast = mean of I/B - 1
+    inside the mask, area = native pixels (4 per 1024-px pixel), mu = cosine of the heliocentric angle of the
+    mask centroid (disk centre and radius from the thresholded disk area).
+    """
     image = np.asarray(Image.open(ROOT / "train/train_images" / f"{stem}.jpeg").convert("L"))
     small = half(image.astype(np.float32))
     flat = (limb_flattened(torch.from_numpy(small / 255)[None, None], factor=4, sigma=4.0)[0, 0] / 4).numpy()
@@ -97,13 +106,19 @@ def observables(stem, rles):
 
 
 def iou_matrix(predictions, truth):
+    """(n_predictions, n_truth) IoU matrix of two RLE lists; zeros when either list is empty."""
     if not predictions or not truth:
         return np.zeros((len(predictions), len(truth)))
     return np.asarray(mu.iou(predictions, truth, [0] * len(truth))).reshape(len(predictions), len(truth))
 
 
 def compare(predictions, truth):
-    """PQ counts at several IoU thresholds and the matched / near-miss / absent profile at .5."""
+    """PQ counts at several IoU thresholds and the matched / near-miss / absent profile at .5.
+
+    For each threshold t: (TP, matched IoU sum, FP, FN) from a one-to-one Hungarian matching of the pairs with
+    IoU > t (below .5, IoU matches are no longer unique). "gt" / "pred" count the reference / predicted
+    instances whose best IoU is > .5, in (.1, .5] or <= .1.
+    """
     iou = iou_matrix(predictions, truth)
     row = {"pq": {}}
     for t in THRESHOLDS:
@@ -122,6 +137,8 @@ def compare(predictions, truth):
 
 
 def summary(pairs):
+    """Pool compare() rows: PQ at every threshold and the shares of matched / near-miss / absent reference
+    instances and of matched / near-miss / unsupported predictions (each share list ends with the count)."""
     out = {"pairs": len(pairs)}
     for t in THRESHOLDS:
         tp, iou, fp, fn = (sum(p["pq"][t][k] for p in pairs) for k in range(4))
@@ -132,8 +149,30 @@ def summary(pairs):
     return out
 
 
+def paired_pq_bootstrap(model_pairs, human_pairs, images, samples=4000, seed=2026):
+    """95 % intervals of PQ(model vs record), PQ(record vs record) and their difference at IoU > .5,
+    resampling observations (all pairs of an observation together)."""
+    images = sorted(images)
+    index = {image: i for i, image in enumerate(images)}
+
+    def table(pairs):
+        sums = np.zeros((len(images), 4))  # TP-IoU sum, TP, FP, FN
+        for p in pairs:
+            if p["image"] in index:
+                tp, iou, fp, fn = p["pq"][.5]
+                sums[index[p["image"]]] += (iou, tp, fp, fn)
+        return sums
+    draws = np.random.default_rng(seed).integers(0, len(images), (samples, len(images)))
+    pq = lambda s: s[..., 0] / (s[..., 1] + .5 * s[..., 2] + .5 * s[..., 3])
+    model, human = pq(table(model_pairs)[draws].sum(1)), pq(table(human_pairs)[draws].sum(1))
+    interval = lambda values: [round(float(q), 4) for q in np.percentile(values, [2.5, 97.5])]
+    return {"observations": len(images), "samples": samples, "model_pq_ci95": interval(model),
+            "human_pq_ci95": interval(human), "difference_ci95": interval(model - human),
+            "p_model_not_better": round(float(np.mean(model - human <= 0)), 4)}
+
+
 def profile(rows, key, edges):
-    """Per bin: count, median contrast and median area."""
+    """Per bin: count, median contrast and median area (bins [lo, hi) of row[key]; empty bins skipped)."""
     out = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         selected = [r for r in rows if lo <= r[key] < hi]
@@ -144,6 +183,7 @@ def profile(rows, key, edges):
 
 
 def binned(rows, key, edges, value):
+    """Per non-empty bin [lo, hi) of row[key]: [label, count, value(rows of the bin)]."""
     out = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         selected = [r for r in rows if lo <= r[key] < hi]
@@ -153,19 +193,27 @@ def binned(rows, key, edges, value):
 
 
 def figure(result, path):
+    """Single-column (3.5 in) two-panel figure: annotator agreement and the model's matched / missed (absent)
+    shares against contrast and area bins, +-1 binomial standard error; saved as <path>.png and <path>.pdf."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     plt.rcParams.update({"font.size": 7, "axes.linewidth": .6, "lines.linewidth": 1.1, "pdf.fonttype": 42})
     fig, axes = plt.subplots(1, 2, figsize=(3.5, 1.88), sharey=True, gridspec_kw={"width_ratios": [6, 4]})
+    # contrast ticks: centres of the inner CONTRAST_EDGES bins (outer bins open-ended); area ticks: AREA_EDGES ranges
     panels = (("contrast", ["<-.20", "-.17", "-.12", "-.085", "-.055", ">-.04"], "contrast $C = I/B - 1$"),
               ("area", ["<500", "500-1.5k", "1.5k-5k", ">5k"], "area (px)"))
+    # +-1 binomial standard error sqrt(p(1-p)/n) per bin
+    error = lambda p, n: np.sqrt(np.asarray(p) * (1 - np.asarray(p)) / np.asarray(n))
     for ax, (key, labels, xlabel) in zip(axes, panels):
         human, model = result[f"human_agreement_vs_{key}"], result[f"model_status_vs_{key}"]
         x = np.arange(len(human))
-        ax.plot(x, [row[2] for row in human], "-o", color="black", ms=2.5, label="annotator agreement")
-        ax.plot(x, [row[2][0] for row in model], "-s", color="tab:blue", ms=2.5, label="model: matched")
-        ax.plot(x, [row[2][2] for row in model], "--^", color="tab:orange", ms=2.5, label="model: missed")
+        series = (([row[2] for row in human], [row[1] for row in human], "-o", "black", "annotator agreement"),
+                  ([row[2][0] for row in model], [row[1] for row in model], "-s", "tab:blue", "model: matched"),
+                  ([row[2][2] for row in model], [row[1] for row in model], "--^", "tab:orange", "model: missed"))
+        for values, counts, style, color, label in series:
+            ax.errorbar(x, values, yerr=error(values, counts), fmt=style, color=color, ms=2.5, capsize=1.5,
+                        elinewidth=.6, capthick=.6, label=label)
         ax.set_xticks(x, labels, rotation=35, ha="right", rotation_mode="anchor")
         ax.set_xlabel(xlabel)
         ax.set_ylim(0, 1)
@@ -180,6 +228,7 @@ def figure(result, path):
 
 
 def main():
+    """Measure every annotated instance, score the model and the annotator pairs, write the JSON and the figure."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--folder", help="fold-0 dump of scripts/dump_tta_candidates.py (required unless --replot)")
     parser.add_argument("--output", default=str(REPOSITORY / "research/label_visibility.json"))
@@ -260,9 +309,11 @@ def main():
         "model_vs_fold0_records_multi_record_observations": summary([p for p in model_pairs if p["image"] in multi0]),
         "human_vs_human_fold0_multi_record_observations": summary([p for p in human_pairs if p["image"] in fold0]),
         "human_vs_human_all_multi_record_observations": summary(human_pairs),
+        "model_vs_human_bootstrap": paired_pq_bootstrap([p for p in model_pairs if p["image"] in multi0],
+                                                        [p for p in human_pairs if p["image"] in fold0], multi0),
         "status_legend": "matched / near miss / absent shares of the reference instances in each bin",
     }
-    Path(args.output).write_text(json.dumps(result, indent=1))
+    Path(args.output).write_text(json.dumps(result, indent=1), encoding="utf-8", newline="\n")
     figure(result, args.figure)
     print(json.dumps({k: result[k] for k in ("counts", "model_vs_fold0_records_multi_record_observations",
                                              "human_vs_human_fold0_multi_record_observations")}, indent=1))

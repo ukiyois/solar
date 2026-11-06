@@ -2,6 +2,12 @@
 
 This is a new portable implementation, not a copy of DSCNet. It constrains
 successive perpendicular increments and retains a conventional local path.
+
+Filament spines bend: a long straight or square kernel on a narrow, curved filament also averages the
+surrounding chromosphere. Each pixel therefore aggregates features along two short curves, one running along
+x and one along y, whose perpendicular displacement is learned per pixel and accumulated point by point: the
+curve stays connected and can follow a bending spine (Dynamic Snake Convolution, Qi et al., ICCV 2023). With 7
+points a curve reaches 3 cells to either side: 6 native px (about 4 Mm) at stride 2, 12 px (9 Mm) at stride 4.
 """
 import torch
 from torch import nn
@@ -12,6 +18,18 @@ from .ops.native import dcnv4_cuda
 
 
 class CurveAggregation(nn.Module):
+    """Weighted sum of features sampled along two learned, continuously bending curves through each pixel.
+
+    Curve 0 runs along x and curve 1 along y, with `points` samples at integer steps -m..m (m = points // 2)
+    of this feature map. Across the axis, each sample is displaced by a running sum of increments
+    step * tanh(.), predicted per pixel by a 3x3 convolution and accumulated outward from the fixed center, so
+    neighboring samples differ by less than `step` pixels across the axis. The offset convolution starts at
+    zero, i.e. with straight horizontal and vertical lines. Sample weights are learned per direction and
+    channel group (max(1, channels // 16) groups), shared by all positions and initialized to 1/points; the
+    two directional results are concatenated and mixed by a 1x1 convolution, LayerNorm2d and GELU.
+    B x C x H x W -> B x C x H x W.
+    """
+
     def __init__(self, channels, points=7, step=0.75, backend="auto"):
         super().__init__()
         self.points, self.step = points, step
@@ -28,10 +46,12 @@ class CurveAggregation(nn.Module):
         self.mix = nn.Sequential(nn.Conv2d(2 * channels, channels, 1), LayerNorm2d(channels), nn.GELU())
 
     def bends(self, x):
+        """Displacement of every sample across its curve's axis, B x 2 x points x H x W (pixels); 0 at the center."""
         b, c, h, w = x.shape
         k, middle = self.points, self.points // 2
         offsets = self.offsets(x).reshape(b, 2, k, h, w).tanh() * self.step
         # The center stays fixed. Each side accumulates outward from the center.
+        # Equal increments on both sides give a straight line with slope tanh(.) * step.
         negative = -offsets[:, :, :middle].flip(2).cumsum(2).flip(2)
         positive = offsets[:, :, middle + 1:].cumsum(2)
         return torch.cat((negative, offsets[:, :, middle:middle + 1] * 0, positive), 2)
@@ -42,6 +62,8 @@ class CurveAggregation(nn.Module):
         Two unused samples receive zero weight. Offsets cancel the native 3x3
         base grid and replace it with the constrained curve. No KxCxHxW sample
         volume is materialized. This is still curve-constrained aggregation.
+        DCNv4 (offset scale 1) samples at p + base_k + offset_k, so offset_k = curve point k - base_k; any
+        curve of at most 9 points fits. One kernel call per direction.
         """
         b, c, h, w = x.shape
         k, groups = self.points, self.groups
@@ -66,6 +88,11 @@ class CurveAggregation(nn.Module):
         return self.mix(torch.cat(outputs, 1))
 
     def forward_reference(self, x, bends):
+        """The same aggregation with grid_sample in float32 (pixel centers, zeros outside the map).
+
+        Used on the CPU and whenever the CUDA kernel is unavailable or unsupported; it materializes a
+        B x C x H x W x points sample volume.
+        """
         b, c, h, w = x.shape
         k, middle = self.points, self.points // 2
         yy, xx = torch.meshgrid(torch.arange(h, device=x.device, dtype=torch.float32),
@@ -87,6 +114,11 @@ class CurveAggregation(nn.Module):
         return self.mix(torch.cat(outputs, 1))
 
     def forward(self, x):
+        """Curve aggregation of B x C x H x W features; fused DCNv4 kernel when possible, else the reference.
+
+        The kernel needs a CUDA input, channel groups whose width is a multiple of 16 and at most 9 points; it is
+        used with backend 'native', or with 'auto' when the extension is built.
+        """
         bends = self.bends(x)
         supported = x.is_cuda and x.shape[1] // self.groups % 16 == 0 and self.points <= 9
         use_native = supported and (self.backend == "native" or
@@ -95,6 +127,14 @@ class CurveAggregation(nn.Module):
 
 
 class CurveResidualBlock(nn.Module):
+    """Local separable residual block plus a narrow curve-aggregation branch.
+
+    out = SeparableBlock(x) + gamma * expand(CurveAggregation(reduce(x))). The branch is
+    min(channels, curve_channels) wide, rounded down to a multiple of 16 (DCNv4 groups of 16 channels) when at
+    least 16, and gamma starts at 1e-4, so a new block initially acts like the local block alone.
+    enabled=False keeps only the local block.
+    """
+
     def __init__(self, channels, points=7, step=0.75, enabled=True, curve_channels=16, backend="auto"):
         super().__init__()
         self.local = SeparableBlock(channels)

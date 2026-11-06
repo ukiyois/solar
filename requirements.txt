@@ -1,12 +1,24 @@
-# Install a GPU-compatible PyTorch first; local verification uses torch 2.10.0+cu128.
+# Every package the code uses, pinned to the versions the project was verified with (Python 3.10).
+# PyTorch 2.10.0 is taken from the CUDA 12.8 wheel index; the DCNv4 CUDA operator additionally needs nvcc 12.8.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.10.0
 numpy==2.2.6
 scipy==1.15.3
 Pillow==11.3.0
 pycocotools==2.0.11
 PyYAML==6.0
 requests==2.32.4
+urllib3==2.5.0
 opencv-python==4.12.0.88
 scikit-image==0.25.2
-yacs==0.1.8
-# Analysis only (scripts/rubric_metrics.py: torchmetrics DiceScore of the filament mask)
+# judging metrics (torchmetrics DiceScore) and figures
 torchmetrics==1.9.0
+matplotlib==3.10.5
+# research/magnetogram_pil.py (FITS magnetograms; analysis only)
+astropy==6.1.7
+# notebooks/end_to_end.ipynb
+ipython==8.37.0
+ipykernel==6.30.1
+# building the official DCNv4 CUDA operator (scripts/build_dcnv4.py)
+setuptools==80.9.0
+ninja==1.13.0

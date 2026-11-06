@@ -1,4 +1,15 @@
-"""Resolve and verify the author's actual HF filenames, including README typo."""
+"""Resolve and verify the author's actual HF filenames, including README typo.
+
+Downloads the ImageNet-22K-to-1K FlashInternImage-L checkpoint of the DCNv4 authors from the Hugging Face
+repository OpenGVLab/DCNv4. The file is looked up by its actual name through the Hugging Face API and pinned to
+the repository revision; the download resumes through <name>.part with HTTP range requests and is accepted
+only if size and SHA-256 match the LFS metadata. <name>.manifest.json records the provenance. For the default
+file, whose SHA-256 is also pinned here, the tensor-only backbone weights/flash_intern_image_l_backbone.pt
+(classification head removed) is extracted; training loads it with weights_only=True. Inference does not
+need it, because the trained checkpoint contains the backbone.
+
+usage (repository root): python scripts/download_weights.py [--output weights]
+"""
 import argparse
 import hashlib
 import json
@@ -10,6 +21,7 @@ from urllib3.util.retry import Retry
 
 
 def sha256(path):
+    """Hex SHA-256 of a file, read in 8 MiB blocks."""
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(8 << 20), b""):
@@ -18,6 +30,7 @@ def sha256(path):
 
 
 def main():
+    """Download (or re-verify) the checkpoint, write its manifest and extract the tensor-only backbone."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="weights")
     parser.add_argument("--filename", default="flash_intern_image_l_22kto1k_384.pth")
@@ -46,6 +59,7 @@ def main():
                                   headers={"Range": f"bytes={offset}-"} if offset else {},
                                   stream=True, timeout=(30, 90)) as stream:
                     stream.raise_for_status()
+                    # no 206 Partial Content: the server ignored the Range header and sends the whole file
                     if offset and stream.status_code != 206:
                         offset = 0
                     mode = "ab" if offset else "wb"

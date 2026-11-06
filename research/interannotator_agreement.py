@@ -1,8 +1,11 @@
 """Inter-annotator agreement on the training set: PQ of one annotator's record scored against another's.
 
-For every observation with several annotator records, each ordered pair (prediction = one record,
-ground truth = another) is scored with the official PQ (IoU > 0.5); the aggregate pools TP/FP/FN over
-all pairs exactly like the competition metric. A model is scored the same way against each record.
+For every observation with several annotator records, each pair of records (prediction = one record,
+ground truth = the other) is scored with the official PQ (IoU > 0.5); PQ is symmetric in the two roles, so
+each pair is scored once. The aggregate pools TP/FP/FN over all pairs exactly like the competition metric.
+research/label_visibility.py scores a model the same way against each record.
+Output: research/interannotator_agreement.json (pairwise PQ distribution, pooled PQ and counts, and the
+pairs with the largest instance-count difference and with the lowest PQ).
 
 usage (repository root): python research/interannotator_agreement.py
 """
@@ -28,6 +31,7 @@ for record_id, image in image_records.items():
     records_by_file[image['file_name']].append(record_id)
 
 def encode_record(record_id):
+    """pycocotools RLEs (2048 x 2048) of the instances of one annotator record, first polygon of each."""
     encoded = []
     for ann in annotations_by_record[record_id]:
         polys = ann['segmentation']
@@ -68,6 +72,7 @@ for filename, record_ids in records_by_file.items():
 
 sorted_scores=sorted(pair_scores)
 def quantile(q):
+    """Linearly interpolated q-quantile of the pairwise PQ values, 4 decimals (None without pairs)."""
     if not sorted_scores: return None
     pos=(len(sorted_scores)-1)*q
     lo=int(pos); hi=min(lo+1,len(sorted_scores)-1); frac=pos-lo

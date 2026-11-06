@@ -4,12 +4,19 @@ For the submission setting, every FN ground-truth instance and every FP predicti
 assigned to a failure mode:
   FN: near-miss   - a kept prediction overlaps it with 0.1 < IoU <= 0.5 (extent / split-merge)
       low-score   - not near-missed, but a fused candidate below the selection rule has IoU > 0.5
-      no-candidate- nothing above IoU 0.1 among kept predictions or candidates
+      no-candidate- no kept prediction with IoU > 0.1 and no fused candidate with IoU > 0.5
   FP: near-miss   - overlaps a GT instance of that record with 0.1 < IoU <= 0.5
-      unlabeled   - no GT overlap in this record (annotator did not draw it / hallucination)
+      unlabeled   - no GT instance of that record with IoU > 0.1 (annotator did not draw it / hallucination)
 FN instances on multi-annotator images are also tagged by agreement: the fraction of the
 image's other records that contain an instance with IoU > 0.5 to it (minority-drawn = < .5).
-TP matched IoU histogram measures the SQ headroom.
+The quantiles of the matched (TP) IoUs measure the SQ headroom.
+
+Output JSON: TP / FP / FN, PQ and SQ from these counts, TP IoU quantiles and every count: fn_*, fp_* and the
+nm_* details of the FN near misses (mean ratios = nm_area_ratio_sum / fn_near_miss and
+nm_<kind>_*_ratio_sum / nm_<kind>_n).
+
+usage: python -m scripts.error_modes --folders runs/tta/<name>/val --folder-views d0,d1,d2,d3,f0,f1,f2,f3 \
+           --output docs/analysis/error_modes_fold0.json
 """
 import argparse
 import json
@@ -25,6 +32,10 @@ from scripts.sweep_recall_tta import full_rle, fuse, ground_truth, ownership
 
 
 def candidate_rles(fused, mask_threshold, min_score=.02):
+    """Full-image RLEs of the fused candidates before selection: score >= min_score, >= 32 px at mask_threshold.
+
+    They decide whether a missed GT instance had a correct candidate ("low-score") or none ("no-candidate").
+    """
     out = []
     for c in fused:
         if c["score"] < min_score:
@@ -36,6 +47,15 @@ def candidate_rles(fused, mask_threshold, min_score=.02):
 
 
 def run(job):
+    """Pool worker: failure-mode counts and matched IoUs of one fold-0 image.
+
+    job = (stem, [(record id, GT RLEs)], folders, views, votes, score, mask); predictions follow the submission
+    rule and every record is scored against them separately. An FN near miss is also described by its
+    best-overlapping prediction: too_small (precision > .7, recall < .6), too_big (recall > .7, precision < .6)
+    or shifted_or_both; whether 2+ predictions or 2+ GT instances are involved (IoU > .05); and the length and
+    width ratios prediction / GT (length = skeleton pixels in the joint bounding box, width = area / length).
+    FN area classes: small < 800 px, medium < 3000 px, large. Returns (Counter, list of TP IoUs).
+    """
     stem, records, folders, views, votes, score, mask = job
     crops, voters = pooled_candidates(stem, folders, views)
     fused = fuse(crops, voters, "members")
@@ -96,6 +116,7 @@ def run(job):
 
 
 def main():
+    """Count the failure modes over all fold-0 images and write the JSON summary."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)

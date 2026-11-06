@@ -4,11 +4,18 @@ Teacher = one or more fold-0 checkpoints x dihedral views, fused exactly like a 
 fusion + pixel ownership, scripts/sweep_recall_tta.py). Frames observed on a hidden-test day are
 never labelled (excluded_days); with <output>/exclude_fold.txt the fold's validation days are dropped
 too. Writes a directory with the competition layout so FilamentDataset reads it:
-  <output>/train/train_images/*.jpeg   (symlinks to the cleaned archive images)
+  <output>/train/train_images          (a symlink to the directory of cleaned archive images)
   <output>/train/MAGFiLO_1.0_Annotations_kaggle2026_train.json
 Instances come from the same member fusion + pixel ownership used for
 submissions; masks become polygons (cv2 contours). Images without any
-instance are left out. Resumable through <output>/pseudo.jsonl.
+instance are left out. Labelling appends one JSON line per frame to <output>/pseudo_<shard>.jsonl, so an
+interrupted run resumes; `assemble` (once, after all shards) merges these logs into the JSON file.
+Every (checkpoint, view) pair is one voter; --votes is an absolute member count.
+
+usage (round 1, see README):
+  python -m scripts.pseudo_label --images data/gong_extra/images --views d0 f2 --votes 1 --score .10 --mask .70 \
+      --checkpoints runs/v9_e3/best.pt runs/v9_e6/best.pt --output data/gong_pseudo
+  python -m scripts.pseudo_label assemble data/gong_pseudo data/gong_extra/images
 """
 import argparse
 import json
@@ -26,6 +33,11 @@ from scripts.sweep_recall_tta import fuse, ownership
 
 
 def polygons(mask):
+    """Outer contours of a binary mask as COCO polygons [x0, y0, x1, y1, ...] (2 decimals).
+
+    Holes are not kept (RETR_EXTERNAL), straight runs are compressed (CHAIN_APPROX_SIMPLE) and contours with
+    fewer than 3 points are dropped.
+    """
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     result = []
     for contour in contours:
@@ -36,6 +48,7 @@ def polygons(mask):
 
 
 def main():
+    """Label every frame of --images that is not excluded (this shard's share) and append to the shard log."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--images", required=True)
     parser.add_argument("--checkpoints", nargs="+", required=True)
@@ -67,6 +80,7 @@ def main():
                 for m, model in enumerate(models):
                     for view in args.views:
                         k, flip = int(view[1]), view[0] == "f"
+                        # keep-score .02 and crop probability .2, the dump_tta_candidates defaults
                         for item in candidates(model, image, k, flip, .02, .2):
                             item["prob"] = item["prob"].astype(np.float32)
                             crops.append({**item, "variant": f"{m}:{view}"})
@@ -104,7 +118,10 @@ def excluded_days(output, data_root="data/raw/MAGFiLO_1.0_Kaggle_2026"):
 
 def assemble(output, images):
     """Merge shard logs into the competition-format JSON (run once after all shards).
-    Frames from excluded_days(output) are left out."""
+    Frames from excluded_days(output) are left out.
+
+    Each kept frame becomes an image record with id "pseudo-<stem>" and size 2048 x 2048. Annotations also
+    keep the teacher score and pixel area for inspection; FilamentDataset reads only the polygons."""
     out = Path(output)
     rows = [json.loads(l) for f in sorted(out.glob("pseudo_*.jsonl")) for l in f.read_text().splitlines()]
     days = excluded_days(out)
@@ -131,6 +148,7 @@ def assemble(output, images):
 
 if __name__ == "__main__":
     import sys
+    # subcommand: python -m scripts.pseudo_label assemble <output> <images directory>
     if len(sys.argv) > 1 and sys.argv[1] == "assemble":
         assemble(sys.argv[2], sys.argv[3])
     else:

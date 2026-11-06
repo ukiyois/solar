@@ -1,4 +1,7 @@
-"""Regressions for sparse foreground confidence and native PQ gradients."""
+"""Regressions for sparse foreground confidence and native PQ gradients.
+
+Native = the full-resolution masks rendered from the fine mask features, as opposed to the coarse query masks.
+"""
 import unittest
 import numpy as np
 import torch
@@ -14,6 +17,11 @@ torch.set_num_threads(2)
 
 
 def fixture(shift=0, foreground=.5):
+    """Synthetic model output and targets: two horizontal filaments on a 128 x 128 image.
+
+    The fine mask basis (stride 2) holds the GT masks, rolled by `shift` rows, as logits `foreground` vs -7;
+    the coarse pred_masks are a constant -5, so only the fine masks carry the shapes.
+    """
     masks = np.zeros((2, 128, 128), bool)
     masks[0, 24:30, 12:112] = True
     masks[1, 84:90, 20:104] = True
@@ -32,6 +40,9 @@ def fixture(shift=0, foreground=.5):
 
 
 class NativePQTests(unittest.TestCase):
+    """Protects inference with cached masks, native point sampling, the area-independent foreground
+    confidence, importance-sampled native areas and the differentiable PQ loss on native masks."""
+
     def test_cached_inference_preserves_masks_filters_and_scores(self):
         basis = torch.full((1, 3, 16, 16), -5.)
         basis[0, 0, 2:10, 2:10] = 3
@@ -54,6 +65,7 @@ class NativePQTests(unittest.TestCase):
                     np.testing.assert_allclose([p['score'] for p in a], [p['score'] for p in b], atol=1e-6)
 
     def test_native_point_definition_matches_render_with_subpixel_phases(self):
+        """fine_mask_points at pixel centres equals the rendered native mask logits, phase features included."""
         torch.manual_seed(3)
         output = {'mask_features2': torch.randn(1, 4, 32, 40),
                   'mask_embeddings': torch.randn(1, 3, 4),
@@ -67,6 +79,8 @@ class NativePQTests(unittest.TestCase):
         torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
 
     def test_sparse_confidence_has_no_background_area_floor(self):
+        """The mean foreground probability of a small instance is the same on a 64 and a 512 px canvas, while
+        the previous soft-gated mean falls below .1 on the 512 px canvas because of the background."""
         means = []
         for side in (64, 512):
             logits = torch.full((1, side, side), -8.)
@@ -91,6 +105,8 @@ class NativePQTests(unittest.TestCase):
         torch.testing.assert_close(estimate, exact, atol=.002, rtol=.02)
 
     def test_pq_uses_refined_masks_and_has_native_gradients(self):
+        """With identical coarse masks, shifting only the fine masks raises the PQ loss, and its gradient
+        reaches the fine mask features."""
         criterion = FilamentCriterion(512, weights={'pq': 1.}, pq_point_count=8192)
         torch.manual_seed(7)
         good, target = fixture(foreground=3.)
@@ -107,6 +123,7 @@ class NativePQTests(unittest.TestCase):
         torch.testing.assert_close(good['pred_masks'], bad['pred_masks'])
 
     def test_primary_objective_can_improve_refined_mask(self):
+        """Optimizing the PQ loss alone with AdamW lowers it by more than 20 % within 16 steps."""
         out, target = fixture(foreground=.1)
         optimizer = torch.optim.AdamW([out['mask_features2'], out['pred_logits'], out['pred_quality']], lr=.15)
         criterion = FilamentCriterion(256, weights={'pq': 1.}, pq_point_count=4096)

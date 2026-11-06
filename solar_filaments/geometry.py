@@ -1,4 +1,10 @@
-"""Segmentation-only geometry cached on CPU. Four native pixels per byte."""
+"""Segmentation-only geometry cached on CPU. Four native pixels per byte.
+
+The training targets of a record are derived from its GT polygons alone (derive_geometry): bit-packed
+native masks, per-cell occupancy at stride 4, dense auxiliary maps at stride 2, fixed-size anchor point
+lists and per-instance ROI crops. transform_geometry applies a quarter turn and flip to them without
+recomputing skeletons. Points are normalized (x, y) in [0, 1], with pixel centers at (i + 0.5) / size.
+"""
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.morphology import skeletonize
@@ -9,6 +15,7 @@ CACHE_VERSION = 4
 
 
 def pack_masks(masks):
+    """N x H x W bool -> N x H/2 x W/2 uint8; bit 2 * dy + dx holds native pixel (2i + dy, 2j + dx)."""
     return (masks[:, 0::2, 0::2].astype(np.uint8) |
             (masks[:, 0::2, 1::2].astype(np.uint8) << 1) |
             (masks[:, 1::2, 0::2].astype(np.uint8) << 2) |
@@ -16,11 +23,17 @@ def pack_masks(masks):
 
 
 def unpack_masks(packed):
+    """Inverse of pack_masks on tensors: N x h x w uint8 -> N x 2h x 2w bool (pixel shuffle of the 4 bits)."""
     phases = torch.stack([((packed >> bit) & 1) for bit in range(4)], 1)
     return F.pixel_shuffle(phases.float(), 2)[:, 0].bool()
 
 
 def target_at_points(target, points):
+    """GT label of every instance at P normalized (x, y) points: N x P float, 0 or 1.
+
+    Reads the native pixel that contains each point directly from the bit-packed masks, without unpacking.
+    The legacy full 'masks' format of diagnostic scripts is also accepted.
+    """
     if "packed_masks" not in target:
         masks = target["masks"]
         h, w = masks.shape[-2:]
@@ -35,6 +48,7 @@ def target_at_points(target, points):
 
 
 def _coordinates(binary, count, rng, size):
+    """`count` pixel centers of a binary map, drawn with replacement, as normalized (x, y); the center if empty."""
     y, x = np.nonzero(binary)
     if not len(x):
         return np.full((count, 2), 0.5, np.float32)
@@ -43,6 +57,19 @@ def _coordinates(binary, count, rng, size):
 
 
 def derive_geometry(masks, anchors=512, roi_size=128):
+    """Training targets of one record from its N x H x W boolean instance masks (H, W divisible by 4).
+
+    Returns numpy arrays. packed_masks: N x H/2 x W/2 uint8 (pack_masks). occupancy4: N x H/4 x W/4 uint8,
+    GT pixels per 4 x 4 cell (0 to 16). auxiliary: 3 x H/2 x W/2 uint8, the union of all masks, skeletons
+    and edge bands, max-pooled 2 x 2; the edge band is the one-pixel ring on each side of the boundary.
+    positive_points, skeleton_points, edge_points: N x anchors x 2 float32 pixel centers drawn with
+    replacement from each instance's mask, skeleton and edge band. rois: N x 4 float32 normalized
+    (x0, y0, x1, y1) of a square of side max(32, longer bounding-box side + 24) native pixels centered on
+    the instance (it may extend beyond the image). roi_masks, roi_skeletons: N x roi_size x roi_size uint8,
+    the mask nearest-sampled on that ROI grid and its skeleton. roi_distance: N x roi_size x roi_size
+    float16 signed distance to the ROI mask boundary (positive outside), in ROI pixels / 4, clipped to
+    [-1, 1]. The fixed random seed makes the cache reproducible. Empty instance masks raise ValueError.
+    """
     n, h, w = masks.shape
     if h % 4 or w % 4:
         raise ValueError("Geometry cache expects dimensions divisible by four")
@@ -53,6 +80,7 @@ def derive_geometry(masks, anchors=512, roi_size=128):
         y, x = np.nonzero(mask)
         if not len(x):
             raise ValueError("Empty annotated polygon; inspect the source record")
+        # Skeleton and edge band are computed on the bounding box plus a 2-pixel margin, for speed.
         y0, y1, x0, x1 = max(0, y.min() - 2), min(h, y.max() + 3), max(0, x.min() - 2), min(w, x.max() + 3)
         crop = mask[y0:y1, x0:x1]
         skeleton = np.zeros_like(mask)
@@ -95,6 +123,12 @@ def derive_geometry(masks, anchors=512, roi_size=128):
 
 
 def transform_geometry(geometry, rotation, flip):
+    """Apply `rotation` counter-clockwise quarter turns (np.rot90), then an optional horizontal flip.
+
+    This is the transform FilamentDataset applies to the image. The bit-packed masks are rotated on their
+    stride-2 grid and their four phase bits permuted, so the result equals packing the transformed native
+    masks. Point lists and ROI boxes are transformed in normalized coordinates.
+    """
     result = {k: v.copy() for k, v in geometry.items()}
     packed = np.rot90(result["packed_masks"], rotation, axes=(-2, -1))
     phases = np.rot90(np.arange(4).reshape(2, 2), rotation)
@@ -108,6 +142,7 @@ def transform_geometry(geometry, rotation, flip):
         value = np.rot90(result[key], rotation, axes=(-2, -1))
         result[key] = (value[..., ::-1] if flip else value).copy()
     def transform_xy(xy):
+        """Normalized (x, y) under the same transform: a quarter turn maps (x, y) to (y, 1 - x), a flip x to 1 - x."""
         xy = xy.copy()
         for _ in range(rotation):
             xy = np.stack((xy[..., 1], 1 - xy[..., 0]), -1)

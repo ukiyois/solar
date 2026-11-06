@@ -5,6 +5,14 @@ either at random (omissions independent of the filament) or smallest-first
 (annotators skipping small/faint filaments). Fused TTA predictions are scored for
 a grid of score thresholds; reports the best threshold per scenario and what the
 current setting loses. Same fusion/ownership as the submission.
+
+Scenarios per rate r: random_<r> (--repeats seeded draws, pooled) and smallest_<r>; random_1.0 is the
+unthinned truth. Output JSON: per scenario the best score threshold, its PQ and the PQ at score .12, plus the
+PQ / precision / recall table. The defaults (votes .111, mask .65, summary at score .12) differ from the final
+submission setting (votes 1/8, score .10, mask .40).
+
+usage: python -m scripts.sparsity_threshold_sim --folders runs/tta/<name>/val \
+           --folder-views d0,d1,d2,d3,f0,f1,f2,f3 --output <sparsity.json>
 """
 import argparse
 import itertools
@@ -21,6 +29,10 @@ from solar_filaments.metrics import aggregate_pq, official_pq
 
 
 def thin(truth, rate, mode, rng):
+    """Keep round(rate x n) of a record's n GT instances (at least 1 if n > 0).
+
+    mode "random" keeps a random subset; mode "smallest" keeps the largest instances, i.e. drops the smallest.
+    """
     keep = max(1, round(rate * len(truth))) if truth else 0
     if mode == "random":
         return rng.sample(truth, keep)
@@ -29,6 +41,12 @@ def thin(truth, rate, mode, rng):
 
 
 def run(job):
+    """Pool worker: official PQ rows of one fold-0 image for every (scenario, score threshold).
+
+    job = (stem, records, folders, views, votes, scores, mask, scenarios, seed). The random generator is seeded
+    by (seed, image, repeat), so every score threshold is scored against the same thinned truth. Returns
+    {(scenario name, score): [official_pq rows]}; the repeats of a scenario share one key.
+    """
     stem, records, folders, views, votes, scores, mask, scenarios, seed = job
     crops, voters = pooled_candidates(stem, folders, views)
     fused = fuse(crops, voters, "members")
@@ -43,6 +61,7 @@ def run(job):
 
 
 def main():
+    """Score every thinning scenario over the score grid and report the best threshold per scenario."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--folders", nargs="+", required=True)
     parser.add_argument("--folder-views", nargs="+", required=True)
@@ -56,6 +75,7 @@ def main():
     args = parser.parse_args()
     views = [v.split(",") for v in args.folder_views]
     votes = max(1, int(round(args.votes * sum(len(v) for v in views))))
+    # (name, rate, mode, repeat): random thinning drawn --repeats times when rate < 1; no smallest-first at rate 1
     scenarios = [(f"{mode}_{rate}", rate, mode, k) for rate in args.rates for mode in ("random", "smallest")
                  for k in range(args.repeats if mode == "random" and rate < 1 else 1) if not (rate == 1 and mode == "smallest")]
     truth = ground_truth()

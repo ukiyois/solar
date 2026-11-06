@@ -1,3 +1,12 @@
+"""Official PQ of saved predictions on the validation fold.
+
+usage: python -m solar_filaments.evaluate --predictions runs/predictions/predictions.json [--fold 0]
+
+The predictions file is the manifest written by solar_filaments.predict. Every annotator record of the
+validation fold is scored against the instances predicted for its physical image (metrics.official_pq),
+the counts are pooled over records (metrics.aggregate_pq), and the result is written to --output with one
+row per record.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -7,6 +16,7 @@ from .metrics import official_pq, aggregate_pq
 
 
 def main():
+    """Score every validation record and write the JSON report; images without predictions raise ValueError."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--data-root", default="data/raw/MAGFiLO_1.0_Kaggle_2026")

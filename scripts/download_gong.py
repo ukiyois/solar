@@ -9,6 +9,15 @@ beyond radius 1024 from the image center set to 0.
 Selection: for every observation day of the competition data (train and test),
 other images of the same day from the six competition sites, plus random extra
 days 2011-2022. The competition files themselves are excluded.
+
+File names start with the observation time and site, YYYYMMDDhhmmss + site code (e.g. 20150527082014Th),
+like the competition files. Per day at most one frame per site is chosen (--per-competition-day or
+--per-random-day sites). Frames of test-image days are downloaded but never pseudo-labelled
+(scripts/pseudo_label.excluded_days). Output in --output: images/*.jpeg, listings/<YYYYMMDD>.json (cached
+FTP listings) and the selection file (--selection-file) with the chosen names; another selection file name
+starts a further batch that skips the days and files of earlier batches.
+
+usage (repository root): python scripts/download_gong.py --output data/gong_extra
 """
 import argparse
 import datetime as dt
@@ -29,6 +38,7 @@ HOST = "gong2.nso.edu"
 
 
 def ftp():
+    """Anonymous FTP login to the NSO GONG archive (120 s timeout)."""
     client = FTP(HOST, timeout=120)
     client.login()
     return client
@@ -38,6 +48,11 @@ LISTING_CACHE = None  # set in main(): <output>/listings/<YYYYMMDD>.json, so res
 
 
 def listing(day):
+    """Names of the .jpg frames of one day in the archive folder /HA/hag/<YYYYMM>/<YYYYMMDD>.
+
+    Successful listings are cached in LISTING_CACHE. Up to 4 attempts with growing pauses; after that an
+    empty list is returned and nothing is cached, so a later run lists the day again.
+    """
     cached = LISTING_CACHE / f"{day:%Y%m%d}.json" if LISTING_CACHE else None
     if cached is not None and cached.exists():
         return json.loads(cached.read_text())
@@ -57,6 +72,10 @@ def listing(day):
 
 
 def clean(raw_bytes):
+    """Decode an archive JPEG to grayscale and zero every pixel farther than 1024 px from the image center.
+
+    This removes the text and logo overlays in the corners; the solar disk lies inside that radius.
+    """
     image = np.asarray(Image.open(io.BytesIO(raw_bytes)).convert("L")).copy()
     h, w = image.shape
     yy, xx = np.ogrid[:h, :w]
@@ -80,6 +99,11 @@ def session(reset=False):
 
 
 def fetch(name, out_dir):
+    """Download one archive frame, clean() it and save it as <out_dir>/<stem>.jpeg (JPEG quality 95).
+
+    Returns a status: "exists" (already downloaded), "ok", "bad_shape" (not 2048 x 2048, not saved) or
+    "failed" after 5 attempts. Attempts after the first re-open the thread's FTP session.
+    """
     target = out_dir / (Path(name).stem + ".jpeg")
     if target.exists():
         return "exists"
@@ -102,6 +126,7 @@ def fetch(name, out_dir):
 
 
 def main():
+    """Select archive frames (or reuse an existing selection file) and download them in parallel."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", default="data/raw/MAGFiLO_1.0_Kaggle_2026")
     parser.add_argument("--output", default="data/gong_extra")
@@ -148,6 +173,7 @@ def main():
             futures = {pool.submit(listing, d): (d, k) for d, k in plan}
             for n, future in enumerate(as_completed(futures)):
                 d, k = futures[future]
+                # x[14:16] = site code, x[:16] = time + site, the stem format of the competition files
                 names = [x for x in future.result() if x[14:16] in SITES and x[:16] not in competition]
                 by_site = {}
                 for x in names:

@@ -1,3 +1,9 @@
+"""Architecture, DCNv4 operator, inference and metric regressions on the small diagnostic model.
+
+Uses configs/diagnostic.yaml and runs on CPU, except three GPU tests: the two native-kernel tests need CUDA
+and the official DCNv4 extension (scripts/build_dcnv4.py), the 2048 px streaming test needs CUDA. They are
+skipped otherwise.
+"""
 import unittest
 from dataclasses import asdict
 from pathlib import Path
@@ -19,14 +25,21 @@ torch.set_num_threads(2)
 
 
 def diagnostic_config():
+    """Small model configuration that builds and runs quickly on CPU."""
     return model_config(read_config("configs/diagnostic.yaml"))
 
 
 class ArchitectureTests(unittest.TestCase):
+    """Protects the DCNv4 reference operator (packed layout, gradients, agreement with the official kernel), the
+    tiled native-resolution detail path, loss and backward of the full model including empty targets,
+    checkpoint round trips, the official PQ convention and the one-query-one-instance inference rule."""
+
     def setUp(self):
         torch.manual_seed(2026)
 
     def test_dcn_group_packing_axis_order_scale_and_no_softmax(self):
+        """Packed layout per group: (x, y) offsets of the 9 kernel points in x-major order, then their 9
+        weights; offset_scale scales kernel grid and offsets alike; the weights are used without softmax."""
         y, x = torch.meshgrid(torch.arange(6), torch.arange(7), indexing="ij")
         plane = (3 * x + 2 * y).float()
         value = plane[None, :, :, None].repeat(1, 1, 1, 32)
@@ -70,6 +83,8 @@ class ArchitectureTests(unittest.TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available() and native_function() is not None, "Official CUDA extension not installed")
     def test_native_half_backward_for_all_large_backbone_group_counts(self):
+        """FP16 native kernel matches the reference (outputs and gradients) for the 10 / 20 / 40 / 80 groups of
+        the large backbone; guards the backward launch geometry of ops.dcnv4.safe_backward_spec."""
         for groups in (10, 20, 40, 80):
             with self.subTest(groups=groups):
                 value = torch.randn(1, 4, 4, groups * 16, device="cuda", dtype=torch.float16, requires_grad=True)
@@ -154,6 +169,8 @@ class ArchitectureTests(unittest.TestCase):
             torch.testing.assert_close(reloaded["pred_masks"], outputs["pred_masks"].detach())
 
     def test_pq_strict_threshold_and_split_merge_penalty(self):
+        """A prediction covering two equal GT instances has IoU exactly .5 with each: no match (strict > .5),
+        so the merge costs 1 FP + 2 FN."""
         a, b = np.zeros((8, 12), bool), np.zeros((8, 12), bool)
         a[2:6, 1:4], b[2:6, 7:10] = True, True
         truth = [encode_mask(a), encode_mask(b)]
